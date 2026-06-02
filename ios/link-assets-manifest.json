@@ -1,0 +1,37 @@
+{
+  "migIndex": 1,
+  "data": [
+    {
+      "path": "src/assets/fonts/.gitkeep",
+      "sha1": "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+    },
+    {
+      "path": "src/assets/fonts/Inter-Bold.ttf",
+      "sha1": "97d4f3722d62c6cc5340bf6220ada3d64ca367b1"
+    },
+    {
+      "path": "src/assets/fonts/Inter-ExtraBold.ttf",
+      "sha1": "97d4f3722d62c6cc5340bf6220ada3d64ca367b1"
+    },
+    {
+      "path": "src/assets/fonts/Inter-Medium.ttf",
+      "sha1": "97d4f3722d62c6cc5340bf6220ada3d64ca367b1"
+    },
+    {
+      "path": "src/assets/fonts/Inter-Regular.ttf",
+      "sha1": "97d4f3722d62c6cc5340bf6220ada3d64ca367b1"
+    },
+    {
+      "path": "src/assets/fonts/Inter-SemiBold.ttf",
+      "sha1": "97d4f3722d62c6cc5340bf6220ada3d64ca367b1"
+    },
+    {
+      "path": "src/assets/fonts/Inter-Variable.ttf",
+      "sha1": "97d4f3722d62c6cc5340bf6220ada3d64ca367b1"
+    },
+    {
+      "path": "src/assets/fonts/README.md",
+      "sha1": "518d0b59dd79f9707129d0bef0e6bec5224e9421"
+    }
+  ]
+}

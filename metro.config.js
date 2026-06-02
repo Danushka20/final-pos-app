@@ -1,11 +1,22 @@
+const path = require('path');
 const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
+const { withNativeWind } = require('nativewind/metro');
 
-/**
- * Metro configuration
- * https://reactnative.dev/docs/metro
- *
- * @type {import('@react-native/metro-config').MetroConfig}
- */
-const config = {};
+const defaultConfig = getDefaultConfig(__dirname);
+const reactDomShim = path.resolve(__dirname, 'src/shims/react-dom.js');
 
-module.exports = mergeConfig(getDefaultConfig(__dirname), config);
+const config = mergeConfig(defaultConfig, {
+  resolver: {
+    resolveRequest: (context, moduleName, platform) => {
+      if (moduleName === 'react-dom' || moduleName.startsWith('react-dom/')) {
+        return {
+          filePath: reactDomShim,
+          type: 'sourceFile',
+        };
+      }
+      return context.resolveRequest(context, moduleName, platform);
+    },
+  },
+});
+
+module.exports = withNativeWind(config, { input: './global.css' });
