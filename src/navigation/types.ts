@@ -1,6 +1,7 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
 import type { PurchaseReceiptPayload } from '@/types/inventory';
 import type { SaleReceiptPayload } from '@/types/sales';
+import type { SystemReportType } from '@/types/reports';
 
 export type TodayActivityTab = 'sales' | 'purchases' | 'reorder';
 
@@ -11,6 +12,8 @@ export type HomeStackParamList = {
   CustomersList: undefined;
   ExpensesList: undefined;
   ExpenseForm: { expenseId?: number };
+  ReportsList: undefined;
+  ReportView: { type: SystemReportType };
 };
 
 export type AuthStackParamList = {
@@ -46,6 +49,8 @@ export type SettingsStackParamList = {
   AlertSettings: undefined;
   NotificationsSettings: undefined;
   UserProfile: undefined;
+  PrinterSetup: undefined;
+  ReceiptCustomize: undefined;
 };
 
 export type MainTabParamList = {

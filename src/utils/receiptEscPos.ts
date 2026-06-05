@@ -1,181 +1,201 @@
 import type { SaleReceiptPayload } from '@/types/sales';
 import type { PurchaseReceiptPayload } from '@/types/inventory';
+import type { PosMobileSettings } from '@/types/settings';
+import type { ReceiptPrintCustomization } from '@/types/receiptPrint';
 import { resolveCurrencyCode } from '@/utils/format';
+import { mergeReceiptPrintSettings } from '@/utils/receiptPrintCustomization';
+import {
+  createReceiptLayout,
+  escDivider,
+  escHeaderLine,
+  escLine,
+  escPadLine,
+  escTitleLine,
+  type ReceiptLayoutContext,
+} from '@/utils/receiptEscPosLayout';
 
-const LINE_WIDTH = 32;
+export type PrintableReceipt = SaleReceiptPayload | PurchaseReceiptPayload;
 
-const padLine = (left: string, right: string): string => {
-  const gap = LINE_WIDTH - left.length - right.length;
-  if (gap <= 0) {
-    return `${left.slice(0, LINE_WIDTH - right.length - 1)} ${right}`;
-  }
-  return `${left}${' '.repeat(gap)}${right}`;
+export type BuildEscPosOptions = {
+  currency?: string | null;
+  customization?: ReceiptPrintCustomization | null;
+  settings?: PosMobileSettings | null;
 };
 
-const center = (text: string): string => {
-  if (text.length >= LINE_WIDTH) {
-    return text.slice(0, LINE_WIDTH);
-  }
-  const pad = Math.floor((LINE_WIDTH - text.length) / 2);
-  return `${' '.repeat(pad)}${text}`;
+const wrapDesc = (ctx: ReceiptLayoutContext, text: string): string => {
+  const w = ctx.lineWidth;
+  return text.length > w ? text.slice(0, w - 1) + '…' : text;
 };
-
-const divider = (char = '-'): string => char.repeat(LINE_WIDTH);
 
 export const buildEscPosReceipt = (
   receipt: SaleReceiptPayload,
-  currency?: string | null,
+  options?: BuildEscPosOptions,
 ): string => {
-  const code = resolveCurrencyCode(currency);
+  const customization = mergeReceiptPrintSettings(
+    options?.settings,
+    options?.customization,
+  );
+  const ctx = createReceiptLayout(customization);
+  const code = resolveCurrencyCode(options?.currency);
   const sale = receipt.sale;
   const header = receipt.header as Record<string, string | undefined>;
   const lines: string[] = [];
 
   const company = header.company_name ?? 'Tax Invoice';
-  lines.push(center(company));
+  lines.push(escTitleLine(ctx, company));
+
   if (header.address_line ?? header.address) {
-    lines.push(center(String(header.address_line ?? header.address)));
+    lines.push(escHeaderLine(ctx, String(header.address_line ?? header.address)));
   }
-  if (header.phone) {
-    lines.push(center(`Tel: ${header.phone}`));
+  if (customization.showPhone && header.phone) {
+    lines.push(escHeaderLine(ctx, `Tel: ${header.phone}`));
   }
-  lines.push('');
+  if (customization.showEmail && header.email) {
+    lines.push(escHeaderLine(ctx, header.email));
+  }
+  if (customization.showTaxId && header.tax_id) {
+    lines.push(escHeaderLine(ctx, `Tax ID: ${header.tax_id}`));
+  }
+  if (customization.showRegistration && header.registration_number) {
+    lines.push(escHeaderLine(ctx, `Reg: ${header.registration_number}`));
+  }
+
+  lines.push(escLine(ctx, ''));
   const isReturn = Boolean((sale as { is_return?: boolean }).is_return);
-  lines.push(center(isReturn ? 'SALES RETURN' : 'TAX INVOICE'));
-  lines.push(center(`${isReturn ? 'Return' : 'Bill'}: ${sale.sales_id}`));
-  lines.push(divider());
-  lines.push(padLine('Date', sale.sale_date));
+  lines.push(escHeaderLine(ctx, isReturn ? 'SALES RETURN' : 'TAX INVOICE'));
+  lines.push(escHeaderLine(ctx, `${isReturn ? 'Return' : 'Bill'}: ${sale.sales_id}`));
+  lines.push(escDivider(ctx));
+  lines.push(escPadLine(ctx, 'Date', sale.sale_date));
+
   if (sale.customer_name) {
-    lines.push(padLine('Customer', sale.customer_name.slice(0, 18)));
+    lines.push(escPadLine(ctx, 'Customer', sale.customer_name.slice(0, 18)));
   }
   if (sale.customer_contact_no) {
-    lines.push(padLine('Phone', sale.customer_contact_no.slice(0, 18)));
+    lines.push(escPadLine(ctx, 'Phone', sale.customer_contact_no.slice(0, 18)));
   }
   if (sale.customer_email) {
-    lines.push(padLine('Email', sale.customer_email.slice(0, 18)));
+    lines.push(escPadLine(ctx, 'Email', sale.customer_email.slice(0, 18)));
   }
   if (sale.customer_location) {
-    lines.push(padLine('Location', sale.customer_location.slice(0, 18)));
+    lines.push(escPadLine(ctx, 'Location', sale.customer_location.slice(0, 18)));
   }
-  lines.push(padLine('Payment', sale.payment_method ?? 'Cash'));
-  lines.push(divider());
-  lines.push(padLine('Item', 'Amount'));
-  lines.push(divider('.'));
+  lines.push(escPadLine(ctx, 'Payment', sale.payment_method ?? 'Cash'));
+  lines.push(escDivider(ctx));
+  lines.push(escPadLine(ctx, 'Item', 'Amount'));
+  lines.push(escLine(ctx, '.'.repeat(ctx.lineWidth), 'left'));
 
   for (const line of sale.lines) {
-    const desc =
-      line.description.length > LINE_WIDTH
-        ? line.description.slice(0, LINE_WIDTH - 1) + '…'
-        : line.description;
+    const desc = wrapDesc(ctx, line.description);
     if (line.item_number) {
-      lines.push(`ID ${line.item_number}`);
+      lines.push(escLine(ctx, `ID ${line.item_number}`));
     }
-    lines.push(desc);
+    lines.push(escLine(ctx, desc));
     const detail = `${line.qty} x ${line.unit_price.toFixed(2)}`;
-    lines.push(padLine(detail, line.line_total.toFixed(2)));
+    lines.push(escPadLine(ctx, detail, line.line_total.toFixed(2)));
   }
 
-  lines.push(divider());
-  lines.push(padLine('Subtotal', sale.sub_total.toFixed(2)));
+  lines.push(escDivider(ctx));
+  lines.push(escPadLine(ctx, 'Subtotal', sale.sub_total.toFixed(2)));
   if (sale.discount > 0) {
-    lines.push(padLine('Discount', `-${sale.discount.toFixed(2)}`));
+    lines.push(escPadLine(ctx, 'Discount', `-${sale.discount.toFixed(2)}`));
   }
-  lines.push(padLine('TOTAL', `${code} ${sale.net_amount.toFixed(2)}`));
+  lines.push(escPadLine(ctx, 'TOTAL', `${code} ${sale.net_amount.toFixed(2)}`));
   if (sale.amount_received != null) {
-    lines.push(padLine('Received', sale.amount_received.toFixed(2)));
+    lines.push(escPadLine(ctx, 'Received', sale.amount_received.toFixed(2)));
     const change = sale.amount_received - sale.net_amount;
     if (change >= 0) {
-      lines.push(padLine('Change', change.toFixed(2)));
+      lines.push(escPadLine(ctx, 'Change', change.toFixed(2)));
     }
   }
-  lines.push(divider());
-  lines.push(center('Thank you!'));
-  lines.push('');
-  lines.push('');
+  lines.push(escDivider(ctx));
+  lines.push(escHeaderLine(ctx, customization.footerMessage));
+  lines.push(escLine(ctx, ''));
+  lines.push(escLine(ctx, ''));
 
-  return lines.join('\n');
+  return lines.join('');
 };
 
 export const buildEscPosPurchaseReceipt = (
   receipt: PurchaseReceiptPayload,
-  currency?: string | null,
+  options?: BuildEscPosOptions,
 ): string => {
-  const code = resolveCurrencyCode(currency);
+  const customization = mergeReceiptPrintSettings(
+    options?.settings,
+    options?.customization,
+  );
+  const ctx = createReceiptLayout(customization);
+  const code = resolveCurrencyCode(options?.currency);
   const purchase = receipt.purchase;
   const header = receipt.header as Record<string, string | undefined>;
   const lines: string[] = [];
 
-  lines.push(center(header.company_name ?? 'Purchase Bill'));
+  lines.push(escTitleLine(ctx, header.company_name ?? 'Purchase Bill'));
   if (header.address_line ?? header.address) {
-    lines.push(center(String(header.address_line ?? header.address)));
+    lines.push(escHeaderLine(ctx, String(header.address_line ?? header.address)));
   }
-  if (header.phone) {
-    lines.push(center(`Tel: ${header.phone}`));
+  if (customization.showPhone && header.phone) {
+    lines.push(escHeaderLine(ctx, `Tel: ${header.phone}`));
   }
-  lines.push('');
-  lines.push(center('PURCHASE BILL'));
-  lines.push(center(`Invoice: ${purchase.invoice_id}`));
-  lines.push(divider());
-  lines.push(padLine('Date', purchase.purchase_date));
+  lines.push(escLine(ctx, ''));
+  lines.push(escHeaderLine(ctx, 'PURCHASE BILL'));
+  lines.push(escHeaderLine(ctx, `Invoice: ${purchase.invoice_id}`));
+  lines.push(escDivider(ctx));
+  lines.push(escPadLine(ctx, 'Date', purchase.purchase_date));
+
   if (purchase.location) {
-    lines.push(padLine('Location', purchase.location.slice(0, 18)));
+    lines.push(escPadLine(ctx, 'Location', purchase.location.slice(0, 18)));
   }
   if (purchase.supplier_name) {
-    lines.push(padLine('Supplier', purchase.supplier_name.slice(0, 18)));
+    lines.push(escPadLine(ctx, 'Supplier', purchase.supplier_name.slice(0, 18)));
   }
   if (purchase.supplier_contact_no) {
-    lines.push(padLine('Phone', purchase.supplier_contact_no.slice(0, 18)));
+    lines.push(escPadLine(ctx, 'Phone', purchase.supplier_contact_no.slice(0, 18)));
   }
   if (purchase.supplier_email) {
-    lines.push(padLine('Email', purchase.supplier_email.slice(0, 18)));
+    lines.push(escPadLine(ctx, 'Email', purchase.supplier_email.slice(0, 18)));
   }
-  lines.push(padLine('Payment', purchase.payment_method ?? 'Cash'));
-  lines.push(divider());
-  lines.push(padLine('Item', 'Amount'));
-  lines.push(divider('.'));
+  lines.push(escPadLine(ctx, 'Payment', purchase.payment_method ?? 'Cash'));
+  lines.push(escDivider(ctx));
+  lines.push(escPadLine(ctx, 'Item', 'Amount'));
+  lines.push(escLine(ctx, '.'.repeat(ctx.lineWidth), 'left'));
 
   for (const line of purchase.lines) {
-    const desc =
-      line.description.length > LINE_WIDTH
-        ? line.description.slice(0, LINE_WIDTH - 1) + '…'
-        : line.description;
+    const desc = wrapDesc(ctx, line.description);
     if (line.item_number) {
-      lines.push(`ID ${line.item_number}`);
+      lines.push(escLine(ctx, `ID ${line.item_number}`));
     }
-    lines.push(desc);
+    lines.push(escLine(ctx, desc));
     const detail = `${line.qty} x ${line.unit_price.toFixed(2)}`;
-    lines.push(padLine(detail, line.line_total.toFixed(2)));
+    lines.push(escPadLine(ctx, detail, line.line_total.toFixed(2)));
   }
 
-  lines.push(divider());
-  lines.push(padLine('Subtotal', purchase.sub_total.toFixed(2)));
+  lines.push(escDivider(ctx));
+  lines.push(escPadLine(ctx, 'Subtotal', purchase.sub_total.toFixed(2)));
   if (purchase.discount > 0) {
-    lines.push(padLine('Discount', `-${purchase.discount.toFixed(2)}`));
+    lines.push(escPadLine(ctx, 'Discount', `-${purchase.discount.toFixed(2)}`));
   }
-  lines.push(padLine('TOTAL', `${code} ${purchase.amount.toFixed(2)}`));
+  lines.push(escPadLine(ctx, 'TOTAL', `${code} ${purchase.amount.toFixed(2)}`));
   if (purchase.amount_paid != null) {
-    lines.push(padLine('Paid', purchase.amount_paid.toFixed(2)));
+    lines.push(escPadLine(ctx, 'Paid', purchase.amount_paid.toFixed(2)));
   }
   if (purchase.notes?.trim()) {
-    lines.push('');
-    lines.push(purchase.notes.trim().slice(0, LINE_WIDTH));
+    lines.push(escLine(ctx, ''));
+    lines.push(escLine(ctx, purchase.notes.trim().slice(0, ctx.lineWidth)));
   }
-  lines.push(divider());
-  lines.push(center('Purchase recorded'));
-  lines.push('');
-  lines.push('');
+  lines.push(escDivider(ctx));
+  lines.push(escHeaderLine(ctx, customization.footerMessage));
+  lines.push(escLine(ctx, ''));
+  lines.push(escLine(ctx, ''));
 
-  return lines.join('\n');
+  return lines.join('');
 };
-
-export type PrintableReceipt = SaleReceiptPayload | PurchaseReceiptPayload;
 
 export const buildEscPosPrintText = (
   receipt: PrintableReceipt,
-  currency?: string | null,
+  options?: BuildEscPosOptions,
 ): string => {
   if ('purchase' in receipt) {
-    return buildEscPosPurchaseReceipt(receipt, currency);
+    return buildEscPosPurchaseReceipt(receipt, options);
   }
-  return buildEscPosReceipt(receipt, currency);
+  return buildEscPosReceipt(receipt, options);
 };

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { View } from 'react-native';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
 import ViewShot, { type ViewShotRef } from 'react-native-view-shot';
@@ -8,11 +8,11 @@ import type { RouteProp } from '@react-navigation/native';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { AppHeader } from '@/components/common/AppHeader';
 import { PrimaryButton } from '@/components/buttons/PrimaryButton';
-import { SelectionModal } from '@/components/common/SelectionModal';
 import { SaleReceiptView } from '@/components/sales/SaleReceiptView';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
+import { navigateToPrinterSetup } from '@/navigation/navigationRef';
 import {
   downloadReceiptAsImage,
   shareReceiptImageFile,
@@ -21,50 +21,26 @@ import type { SalesStackParamList } from '@/navigation/types';
 
 type Route = RouteProp<SalesStackParamList, 'SaleReceipt'>;
 
+const isPrinterSetupError = (msg: string): boolean =>
+  /no printer|not configured|settings/i.test(msg);
+
 export const SaleReceiptScreen: React.FC = () => {
   const navigation = useNavigation();
   const { params } = useRoute<Route>();
   const { settings, currency } = usePosSettings();
-  const { showError } = useErrorDialog();
+  const { showError, showConfirm } = useErrorDialog();
   const [printing, setPrinting] = useState(false);
-  const [printerModal, setPrinterModal] = useState(false);
-  const [printers, setPrinters] = useState<Array<{ name: string; address: string }>>([]);
-  const [scanning, setScanning] = useState(false);
   const [savingImage, setSavingImage] = useState(false);
   const receiptShotRef = useRef<ViewShotRef>(null);
 
-  useEffect(() => {
-    if (!bluetoothPrintService.isSupported()) {
-      return;
-    }
-    bluetoothPrintService.getSavedPrinterAddress().then(saved => {
-      if (saved) {
-        return;
-      }
-      setPrinterModal(true);
+  const promptPrinterSetup = (message: string) => {
+    showConfirm({
+      title: 'Printer not set up',
+      message,
+      confirmLabel: 'Open printer setup',
+      cancelLabel: 'Cancel',
+      onConfirm: () => navigateToPrinterSetup(),
     });
-  }, []);
-
-  const scanPrinters = async () => {
-    setScanning(true);
-    try {
-      const list = await bluetoothPrintService.scanPrinters();
-      setPrinters(list);
-      if (list.length === 0) {
-        showError({
-          title: 'Printer',
-          message: 'No Bluetooth printers found. Pair your printer in Android settings first.',
-          variant: 'warning',
-        });
-      }
-    } catch (e) {
-      showError({
-        title: 'Printer',
-        message: e instanceof Error ? e.message : 'Could not scan printers',
-      });
-    } finally {
-      setScanning(false);
-    }
   };
 
   const handleDownloadImage = async () => {
@@ -106,23 +82,20 @@ export const SaleReceiptScreen: React.FC = () => {
   const handlePrint = async () => {
     setPrinting(true);
     try {
-      await bluetoothPrintService.printReceipt(params.receipt, currency);
+      await bluetoothPrintService.printReceipt(params.receipt, currency, settings);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Print failed';
-      if (/no printer paired|connect/i.test(msg)) {
-        setPrinterModal(true);
+      if (isPrinterSetupError(msg)) {
+        promptPrinterSetup(
+          `${msg}\n\nConfigure your portable printer once in Settings → Receipt printer.`,
+        );
+      } else {
+        showError({ title: 'Print', message: msg, variant: 'warning' });
       }
-      showError({ title: 'Print', message: msg, variant: 'warning' });
     } finally {
       setPrinting(false);
     }
   };
-
-  const printerOptions = printers.map(p => ({
-    id: p.address,
-    label: p.name,
-    subtitle: p.address,
-  }));
 
   return (
     <ScreenContainer>
@@ -160,21 +133,11 @@ export const SaleReceiptScreen: React.FC = () => {
             disabled={savingImage}
           />
           {bluetoothPrintService.isSupported() ? (
-            <>
-              <PrimaryButton
-                label={printing ? 'Printing…' : 'Print via Bluetooth'}
-                onPress={handlePrint}
-                loading={printing}
-              />
-              <PrimaryButton
-                label="Connect printer"
-                variant="outline"
-                onPress={() => {
-                  setPrinterModal(true);
-                  scanPrinters();
-                }}
-              />
-            </>
+            <PrimaryButton
+              label={printing ? 'Printing…' : 'Print via Bluetooth'}
+              onPress={handlePrint}
+              loading={printing}
+            />
           ) : null}
           <PrimaryButton
             label="New sale"
@@ -190,30 +153,6 @@ export const SaleReceiptScreen: React.FC = () => {
           />
         </Box>
       </SmoothScrollView>
-
-      <SelectionModal
-        visible={printerModal}
-        title={scanning ? 'Scanning printers…' : 'Bluetooth printer'}
-        options={printerOptions}
-        onSelect={async opt => {
-          try {
-            await bluetoothPrintService.connect(opt.id);
-            setPrinterModal(false);
-            await handlePrint();
-          } catch (e) {
-            showError({
-              title: 'Printer',
-              message: e instanceof Error ? e.message : 'Could not connect',
-            });
-          }
-        }}
-        onClose={() => setPrinterModal(false)}
-        emptyMessage={
-          scanning
-            ? 'Searching…'
-            : 'Tap refresh — pair printer in Android Bluetooth settings first'
-        }
-      />
     </ScreenContainer>
   );
 };

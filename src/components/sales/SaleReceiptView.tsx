@@ -1,6 +1,7 @@
 import React from 'react';
 import { Image, StyleSheet, View } from 'react-native';
 import { Box, HStack, Text, VStack } from '@gluestack-ui/themed';
+import { useReceiptLogoUri } from '@/hooks/useReceiptLogoUri';
 import { formatCurrency, resolveCurrencyCode } from '@/utils/format';
 import { colors } from '@/theme';
 import type { SaleReceiptPayload } from '@/types/sales';
@@ -20,12 +21,7 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
   const hardware = (settings?.hardware ??
     receipt.hardware_settings ??
     {}) as Record<string, unknown>;
-  const printOpts = receipt.print_options as Record<string, unknown> | undefined;
-  const logoUrl =
-    (printOpts?.logo_url as string | undefined) ??
-    header.logo_url ??
-    settings?.printHeader?.logo_url ??
-    settings?.company?.logo_url;
+  const logoUrl = useReceiptLogoUri(settings, receipt);
 
   const currency = resolveCurrencyCode(settings?.company?.currency);
   const companyName =

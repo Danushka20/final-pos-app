@@ -192,7 +192,7 @@ export const PurchaseOrderScreen: React.FC = () => {
     setPrinting(true);
     try {
       if (bluetoothPrintService.isSupported()) {
-        await bluetoothPrintService.printReceipt(result.receipt, currency);
+        await bluetoothPrintService.printReceipt(result.receipt, currency, settings);
       }
     } catch (e) {
       showError({
@@ -200,7 +200,7 @@ export const PurchaseOrderScreen: React.FC = () => {
         message:
           e instanceof Error
             ? e.message
-            : 'Could not print bill. You can print from the receipt screen.',
+            : 'Could not print bill. Set up your printer in Settings → Receipt printer.',
         variant: 'warning',
       });
     } finally {

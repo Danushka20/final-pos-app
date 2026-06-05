@@ -1,6 +1,7 @@
 import React from 'react';
 import { Image, StyleSheet, View } from 'react-native';
 import { HStack, Text, VStack } from '@gluestack-ui/themed';
+import { useReceiptLogoUri } from '@/hooks/useReceiptLogoUri';
 import { formatCurrency, resolveCurrencyCode } from '@/utils/format';
 import { colors } from '@/theme';
 import type { PurchaseReceiptPayload } from '@/types/inventory';
@@ -17,10 +18,7 @@ export const PurchaseReceiptView: React.FC<PurchaseReceiptViewProps> = ({
 }) => {
   const purchase = receipt.purchase;
   const header = receipt.header as Record<string, string | undefined>;
-  const logoUrl =
-    header.logo_url ??
-    settings?.printHeader?.logo_url ??
-    settings?.company?.logo_url;
+  const logoUrl = useReceiptLogoUri(settings, receipt);
 
   const currency = resolveCurrencyCode(settings?.company?.currency);
   const companyName =

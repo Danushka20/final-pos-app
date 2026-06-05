@@ -3,6 +3,26 @@ import type { AppStackParamList } from '@/navigation/types';
 
 export const navigationRef = createNavigationContainerRef<AppStackParamList>();
 
+export function navigateToPrinterSetup(): void {
+  if (!navigationRef.isReady()) {
+    return;
+  }
+  navigationRef.navigate('MainTabs', {
+    screen: 'Profile',
+    params: { screen: 'PrinterSetup' },
+  });
+}
+
+export function navigateToReports(): void {
+  if (!navigationRef.isReady()) {
+    return;
+  }
+  navigationRef.navigate('MainTabs', {
+    screen: 'Home',
+    params: { screen: 'ReportsList' },
+  });
+}
+
 export function navigateToAlerts(): void {
   if (!navigationRef.isReady()) {
     return;

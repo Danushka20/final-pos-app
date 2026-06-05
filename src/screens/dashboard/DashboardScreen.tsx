@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   Wallet,
   Receipt,
+  FileText,
 } from 'lucide-react-native';
 import { Card, Text } from 'react-native-paper';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
@@ -46,6 +47,7 @@ const QUICK_ACTIONS = [
   { id: 'expense_new', label: 'Add Expense', subtitle: 'Record cost', icon: Receipt, color: colors.pastelYellowSoft },
   { id: 'customers', label: 'Customers', subtitle: 'Manage CRM', icon: Users, color: colors.pastelBlue },
   { id: 'purchases', label: 'Purchases', subtitle: 'Supplier orders', icon: Truck, color: colors.pastelGreenSoft },
+  { id: 'reports', label: 'Reports', subtitle: 'View & print', icon: FileText, color: colors.pastelBlue },
 ] as const;
 
 export const DashboardScreen: React.FC = () => {
@@ -115,6 +117,9 @@ export const DashboardScreen: React.FC = () => {
         break;
       case 'purchases':
         navigation.navigate('Products', { screen: 'PurchasesList' });
+        break;
+      case 'reports':
+        navigation.navigate('ReportsList');
         break;
       default:
         break;

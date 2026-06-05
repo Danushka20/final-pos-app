@@ -42,7 +42,7 @@ export const SaleOrderScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const { showError } = useErrorDialog();
-  const { currency } = usePosSettings();
+  const { currency, settings } = usePosSettings();
   const pos = usePosSaleContext();
 
   const [customerModal, setCustomerModal] = useState(false);
@@ -213,7 +213,7 @@ export const SaleOrderScreen: React.FC = () => {
     setPrinting(true);
     try {
       if (bluetoothPrintService.isSupported()) {
-        await bluetoothPrintService.printReceipt(receiptWithCustomerInfo, currency);
+        await bluetoothPrintService.printReceipt(receiptWithCustomerInfo, currency, settings);
       }
     } catch (e) {
       showError({
@@ -221,7 +221,7 @@ export const SaleOrderScreen: React.FC = () => {
         message:
           e instanceof Error
             ? e.message
-            : 'Could not print receipt. Connect a Bluetooth printer in receipt screen.',
+            : 'Could not print receipt. Set up your printer in Settings → Receipt printer.',
         variant: 'warning',
       });
     } finally {

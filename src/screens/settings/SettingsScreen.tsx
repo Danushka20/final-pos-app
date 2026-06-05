@@ -1,10 +1,11 @@
-import React from 'react';
-import { useNavigation } from '@react-navigation/native';
+import React, { useCallback, useState } from 'react';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { SettingsStackParamList } from '@/navigation/types';
 import {
   Building2,
   Bell,
+  FileText,
   HardDrive,
   LogOut,
   Package,
@@ -13,6 +14,7 @@ import {
   Users,
   Wifi,
   AlertTriangle,
+  BarChart3,
 } from 'lucide-react-native';
 import { Box, Text, VStack } from '@gluestack-ui/themed';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
@@ -23,6 +25,8 @@ import { useAuth } from '@/context/AuthContext';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
 import { getApiBaseUrl } from '@/config/env';
+import { navigateToReports } from '@/navigation/navigationRef';
+import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
 import { colors, TAB_BAR_SCROLL_PADDING } from '@/theme';
 
 const ProfileAvatar: React.FC<{ name?: string }> = ({ name }) => {
@@ -49,6 +53,25 @@ export const SettingsScreen: React.FC = () => {
   const { user, logout } = useAuth();
   const { settings, loading: settingsLoading } = usePosSettings();
   const { showError, showConfirm } = useErrorDialog();
+  const [printerSubtitle, setPrinterSubtitle] = useState('Receipt printer');
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!bluetoothPrintService.isSupported()) {
+        setPrinterSubtitle('Bluetooth printing unavailable');
+        return;
+      }
+      bluetoothPrintService.getSavedPrinter().then(saved => {
+        if (saved) {
+          setPrinterSubtitle(saved.name);
+          return;
+        }
+        bluetoothPrintService.isConfigured().then(configured => {
+          setPrinterSubtitle(configured ? 'Printer saved' : 'Not configured — tap to set up');
+        });
+      });
+    }, []),
+  );
 
   const showSettingsInfo = (title: string, payload: Record<string, unknown>) => {
     const lines = Object.entries(payload)
@@ -151,20 +174,25 @@ export const SettingsScreen: React.FC = () => {
               icon={HardDrive}
               iconColor={colors.primaryDeep}
               iconBg={colors.primarySoft}
-              title="Hardware"
-              subtitle={
-                settings?.hardware &&
-                (settings.hardware as { printing_paper_size?: string })
-                  .printing_paper_size
-                  ? String(
-                      (settings.hardware as { printing_paper_size?: string })
-                        .printing_paper_size,
-                    )
-                  : 'Receipt & printer'
-              }
-              onPress={() =>
-                showSettingsInfo('Hardware', settings?.hardware ?? {})
-              }
+              title="Receipt printer"
+              subtitle={printerSubtitle}
+              onPress={() => navigation.navigate('PrinterSetup')}
+            />
+            <SettingsRow
+              icon={FileText}
+              iconColor={colors.primary}
+              iconBg={colors.pastelYellow}
+              title="Receipt layout"
+              subtitle="Logo upload, center, font, footer"
+              onPress={() => navigation.navigate('ReceiptCustomize')}
+            />
+            <SettingsRow
+              icon={BarChart3}
+              iconColor={colors.primaryDeep}
+              iconBg={colors.pastelBlue}
+              title="System reports"
+              subtitle="Daily summary, sales, purchases, reorder"
+              onPress={() => navigateToReports()}
             />
             <SettingsRow
               icon={Bell}
