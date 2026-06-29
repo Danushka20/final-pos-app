@@ -3,7 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { Card, Text } from 'react-native-paper';
 import { ChevronRight, LucideProps } from 'lucide-react-native';
 import type { ComponentType } from 'react';
-import { cardStyles, colors, radius, shadows, typography } from '@/theme';
+import { cardStyles, colors, radius, typography } from '@/theme';
 
 export type StatCardVariant = 'default' | 'yellow' | 'pink' | 'green' | 'dark';
 

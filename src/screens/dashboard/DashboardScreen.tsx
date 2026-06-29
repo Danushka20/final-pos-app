@@ -46,6 +46,7 @@ const QUICK_ACTIONS = [
   { id: 'expenses', label: 'Expenses', subtitle: 'View history', icon: Wallet, color: colors.pastelPink },
   { id: 'expense_new', label: 'Add Expense', subtitle: 'Record cost', icon: Receipt, color: colors.pastelYellowSoft },
   { id: 'customers', label: 'Customers', subtitle: 'Manage CRM', icon: Users, color: colors.pastelBlue },
+  { id: 'customer_new', label: 'Add Customer', subtitle: 'New contact', icon: Users, color: colors.pastelBlue },
   { id: 'purchases', label: 'Purchases', subtitle: 'Supplier orders', icon: Truck, color: colors.pastelGreenSoft },
   { id: 'reports', label: 'Reports', subtitle: 'View & print', icon: FileText, color: colors.pastelBlue },
 ] as const;
@@ -115,11 +116,14 @@ export const DashboardScreen: React.FC = () => {
       case 'customers':
         navigation.navigate('CustomersList');
         break;
+      case 'customer_new':
+        navigation.navigate('CustomerForm', {});
+        break;
       case 'purchases':
         navigation.navigate('Products', { screen: 'PurchasesList' });
         break;
       case 'reports':
-        navigation.navigate('ReportsList');
+        navigation.navigate('Reports', { screen: 'ReportsList' });
         break;
       default:
         break;
@@ -238,7 +242,7 @@ export const DashboardScreen: React.FC = () => {
                 icon={AlertTriangle}
                 variant="pink"
                 subtitleColor={colors.warning}
-                onPress={() => navigation.navigate('Sales')}
+                onPress={() => navigation.navigate('Sales', { screen: 'HoldOrders' })}
               />
             </View>
             <View style={styles.metricHalf}>

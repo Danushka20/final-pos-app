@@ -13,7 +13,8 @@ export type DataRefreshScope =
   | 'customers'
   | 'purchases'
   | 'expenses'
-  | 'sales';
+  | 'sales'
+  | 'reports';
 
 const SCOPES: DataRefreshScope[] = [
   'dashboard',
@@ -23,6 +24,7 @@ const SCOPES: DataRefreshScope[] = [
   'purchases',
   'expenses',
   'sales',
+  'reports',
 ];
 
 type RevisionMap = Record<DataRefreshScope, number>;

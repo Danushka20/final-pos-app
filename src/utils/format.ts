@@ -9,6 +9,18 @@ const CURRENCY_ALIASES: Record<string, string> = {
   lkr: 'LKR',
   'sri lankan rupee': 'LKR',
   'sri lanka rupee': 'LKR',
+  usd: 'USD',
+  '$': 'USD',
+  dollar: 'USD',
+  dollars: 'USD',
+  eur: 'EUR',
+  euro: 'EUR',
+  euros: 'EUR',
+  gbp: 'GBP',
+  pound: 'GBP',
+  aed: 'AED',
+  sar: 'SAR',
+  inr: 'INR',
 };
 
 /** Normalize backend / legacy labels to a valid ISO 4217 code */
@@ -48,6 +60,27 @@ export const formatCurrency = (
     }).format(amount);
   }
 };
+
+/** Symbol or code for labels — e.g. "Rs.", "$", "LKR" */
+export const getCurrencyLabel = (currency?: string | null): string => {
+  const code = resolveCurrencyCode(currency);
+  try {
+    const parts = new Intl.NumberFormat(localeForCurrency(code), {
+      style: 'currency',
+      currency: code,
+    }).formatToParts(0);
+    const symbol = parts.find(part => part.type === 'currency')?.value?.trim();
+    return symbol && symbol !== code ? symbol : code;
+  } catch {
+    return code;
+  }
+};
+
+/** Receipt / Bluetooth print lines — same localized currency as on-screen prices */
+export const formatPrintAmount = (
+  value?: number | null,
+  currency?: string | null,
+): string => formatCurrency(value, currency);
 
 export const formatNumber = (value?: number | null): string => {
   return new Intl.NumberFormat('en-US').format(value ?? 0);

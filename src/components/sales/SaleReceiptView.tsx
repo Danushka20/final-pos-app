@@ -1,8 +1,14 @@
 import React from 'react';
 import { Image, StyleSheet, View } from 'react-native';
-import { Box, HStack, Text, VStack } from '@gluestack-ui/themed';
+import { HStack, Text, VStack } from '@gluestack-ui/themed';
 import { useReceiptLogoUri } from '@/hooks/useReceiptLogoUri';
-import { formatCurrency, resolveCurrencyCode } from '@/utils/format';
+import {
+  DEFAULT_RECEIPT_STORE_NAME,
+  getSaleReceiptTitle,
+  RECEIPT_SOFTWARE_PROVIDER,
+} from '@/constants/receiptBranding';
+import { formatCurrency, getCurrencyLabel, resolveCurrencyCode } from '@/utils/format';
+import { formatReceiptQtyDetail, resolveLineUom } from '@/utils/uom';
 import { colors } from '@/theme';
 import type { SaleReceiptPayload } from '@/types/sales';
 import type { PosMobileSettings } from '@/types/settings';
@@ -28,7 +34,7 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
     header.company_name ??
     settings?.printHeader?.company_name ??
     settings?.company?.name ??
-    'Tax Invoice';
+    DEFAULT_RECEIPT_STORE_NAME;
   const address =
     header.address_line ?? header.address ?? settings?.printHeader?.address_line;
   const phone = header.phone ?? settings?.printHeader?.phone;
@@ -47,8 +53,21 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
     minute: '2-digit',
   })}`;
 
+  const isHold = Boolean(sale.is_hold || sale.order_status === 'hold');
+  const invoiceTitle = getSaleReceiptTitle({
+    isHold,
+    isReturn: Boolean(sale.is_return),
+  });
+
+  const discountLabel = (() => {
+    const base = sale.discount_label ?? 'Discount';
+    if (sale.discount_percent != null && sale.discount_percent > 0) {
+      return `${base} (${sale.discount_percent}%)`;
+    }
+    return base;
+  })();
   const change =
-    sale.amount_received != null
+    !isHold && sale.amount_received != null
       ? sale.amount_received - sale.net_amount
       : null;
   const customerInfoRows = [
@@ -80,12 +99,20 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
       <Text
         style={[
           styles.invoiceTitle,
-          sale.is_return ? { color: colors.error } : undefined,
+          sale.is_return ? { color: colors.error } : isHold ? { color: colors.warning } : undefined,
         ]}>
-        {sale.is_return ? 'SALES RETURN' : 'TAX INVOICE'}
+        {invoiceTitle}
+      </Text>
+      {isHold ? (
+        <Text style={[styles.mutedCenter, styles.holdNotice]}>
+          Not paid — complete this hold bill to finalize
+        </Text>
+      ) : null}
+      <Text style={styles.mutedCenter}>
+        {sale.is_return ? 'Return No' : isHold ? 'Hold No' : 'Bill No'}: {sale.sales_id}
       </Text>
       <Text style={styles.mutedCenter}>
-        {sale.is_return ? 'Return No' : 'Bill No'}: {sale.sales_id}
+        All amounts in {getCurrencyLabel(currency)}
       </Text>
 
       <View style={styles.metaBlock}>
@@ -113,20 +140,28 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
       </View>
       <View style={styles.dividerThin} />
 
-      {sale.lines.map((line, idx) => (
+      {sale.lines.map((line, idx) => {
+        const uom = resolveLineUom(line.uom);
+        return (
         <View key={`${line.item_number}-${idx}`} style={styles.lineRow}>
           <VStack style={styles.colItem} flex={1}>
             <Text style={styles.lineDesc}>{line.description}</Text>
             <Text style={styles.lineSub}>
               {line.item_number ? `ID ${line.item_number} · ` : ''}
-              {line.qty} × {formatCurrency(line.unit_price, currency)}
+              {formatReceiptQtyDetail(
+                line.qty,
+                formatCurrency(line.unit_price, currency),
+                uom,
+              )}
             </Text>
           </VStack>
+          <Text style={[styles.lineQty, styles.colQty]}>{`${line.qty} ${uom}`}</Text>
           <Text style={[styles.lineAmt, styles.colAmt]}>
             {formatCurrency(line.line_total, currency)}
           </Text>
         </View>
-      ))}
+        );
+      })}
 
       <View style={styles.divider} />
 
@@ -136,7 +171,7 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
       />
       {sale.discount > 0 ? (
         <TotalRow
-          label={sale.discount_label ?? 'Discount'}
+          label={discountLabel}
           value={`-${formatCurrency(sale.discount, currency)}`}
         />
       ) : null}
@@ -147,12 +182,14 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
         />
       ) : null}
       <View style={styles.grandRow}>
-        <Text style={styles.grandLabel}>TOTAL</Text>
+        <Text style={styles.grandLabel}>
+          {isHold ? 'AMOUNT DUE' : sale.discount > 0 ? 'BALANCE' : 'TOTAL'}
+        </Text>
         <Text style={styles.grandValue}>
           {formatCurrency(sale.net_amount, currency)}
         </Text>
       </View>
-      {sale.amount_received != null ? (
+      {!isHold && sale.amount_received != null ? (
         <>
           <TotalRow
             label="Received"
@@ -166,6 +203,7 @@ export const SaleReceiptView: React.FC<SaleReceiptViewProps> = ({
 
       <View style={styles.divider} />
       <Text style={styles.thankYou}>Thank you for your business!</Text>
+      <Text style={styles.softwareLine}>{RECEIPT_SOFTWARE_PROVIDER}</Text>
       <Text style={styles.footerNote}>Printed: {printedAt}</Text>
       {sale.show_barcode && sale.barcode_value ? (
         <Text style={styles.barcode}>{sale.barcode_value}</Text>
@@ -232,6 +270,11 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     color: colors.text,
   },
+  holdNotice: {
+    color: colors.warning,
+    fontWeight: '700',
+    marginTop: 4,
+  },
   divider: {
     height: 1,
     backgroundColor: colors.text,
@@ -281,13 +324,14 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   colItem: { flex: 1 },
-  colQty: { width: 36, textAlign: 'right' },
+  colQty: { width: 52, textAlign: 'right' },
   colAmt: { width: 80, textAlign: 'right' },
   lineRow: {
     flexDirection: 'row',
     paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
+    alignItems: 'flex-start',
   },
   lineDesc: {
     fontSize: 13,
@@ -303,6 +347,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: colors.text,
+    textAlign: 'right',
+  },
+  lineQty: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textSecondary,
     textAlign: 'right',
   },
   totalLabel: {
@@ -338,6 +388,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.text,
     marginTop: 4,
+  },
+  softwareLine: {
+    textAlign: 'center',
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    marginTop: 8,
+    letterSpacing: 0.4,
   },
   footerNote: {
     textAlign: 'center',

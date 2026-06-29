@@ -1,18 +1,23 @@
 import React from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { getFocusedRouteNameFromRoute } from '@react-navigation/native';
+import {
+  getFocusedRouteNameFromRoute,
+  type RouteProp,
+} from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   LayoutDashboard,
   ShoppingCart,
   Package,
   User,
+  FileText,
 } from 'lucide-react-native';
 import { HomeStackNavigator } from '@/navigation/HomeStackNavigator';
 import { SettingsStackNavigator } from '@/navigation/SettingsStackNavigator';
 import { SalesStackNavigator } from '@/navigation/SalesStackNavigator';
 import { ProductsStackNavigator } from '@/navigation/ProductsStackNavigator';
+import { ReportsStackNavigator } from '@/navigation/ReportsStackNavigator';
 import { colors, shadows, typography } from '@/theme';
 import {
   TAB_BAR_BOTTOM_MARGIN,
@@ -22,6 +27,15 @@ import {
 import type { MainTabParamList } from './types';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
+
+/** Tab bar visible only on these root screens — hidden on every nested stack screen. */
+const TAB_ROOT_SCREEN: Record<keyof MainTabParamList, string> = {
+  Home: 'Dashboard',
+  Sales: 'SalesPOS',
+  Products: 'ProductsList',
+  Reports: 'ReportsList',
+  Profile: 'SettingsHome',
+};
 
 const tabIcon =
   (Icon: typeof LayoutDashboard) =>
@@ -61,6 +75,26 @@ export const MainTabNavigator: React.FC = () => {
     ...shadows.lg,
   };
 
+  const tabOptions =
+    <T extends keyof MainTabParamList>(
+      tab: T,
+      label: string,
+      Icon: typeof LayoutDashboard,
+    ) =>
+    ({ route }: { route: RouteProp<MainTabParamList, T> }) => {
+      const rootScreen = TAB_ROOT_SCREEN[tab];
+      const focusedRoute = getFocusedRouteNameFromRoute(route) ?? rootScreen;
+      const showTabBar = focusedRoute === rootScreen;
+
+      return {
+        tabBarLabel: label,
+        tabBarIcon: tabIcon(Icon),
+        tabBarStyle: showTabBar
+          ? baseTabBarStyle
+          : [baseTabBarStyle, { display: 'none' as const }],
+      };
+    };
+
   return (
     <Tab.Navigator
       initialRouteName="Sales"
@@ -90,50 +124,27 @@ export const MainTabNavigator: React.FC = () => {
       <Tab.Screen
         name="Home"
         component={HomeStackNavigator}
-        options={{
-          tabBarLabel: 'Home',
-          tabBarIcon: tabIcon(LayoutDashboard),
-        }}
+        options={tabOptions('Home', 'Home', LayoutDashboard)}
       />
       <Tab.Screen
         name="Sales"
         component={SalesStackNavigator}
-        options={({ route }) => {
-          const childRouteName = getFocusedRouteNameFromRoute(route) ?? 'SalesPOS';
-          const hideTabBar = childRouteName === 'SaleOrder' || childRouteName === 'SaleReceipt';
-          return {
-            tabBarLabel: 'Sales',
-            tabBarIcon: tabIcon(ShoppingCart),
-            tabBarStyle: hideTabBar
-              ? [baseTabBarStyle, { display: 'none' }]
-              : baseTabBarStyle,
-          };
-        }}
+        options={tabOptions('Sales', 'Sales', ShoppingCart)}
       />
       <Tab.Screen
         name="Products"
         component={ProductsStackNavigator}
-        options={({ route }) => {
-          const childRouteName =
-            getFocusedRouteNameFromRoute(route) ?? 'ProductsList';
-          const hideTabBar =
-            childRouteName === 'PurchaseOrder' || childRouteName === 'PurchaseReceipt';
-          return {
-            tabBarLabel: 'Products',
-            tabBarIcon: tabIcon(Package),
-            tabBarStyle: hideTabBar
-              ? [baseTabBarStyle, { display: 'none' }]
-              : baseTabBarStyle,
-          };
-        }}
+        options={tabOptions('Products', 'Products', Package)}
+      />
+      <Tab.Screen
+        name="Reports"
+        component={ReportsStackNavigator}
+        options={tabOptions('Reports', 'Reports', FileText)}
       />
       <Tab.Screen
         name="Profile"
         component={SettingsStackNavigator}
-        options={{
-          tabBarLabel: 'Settings',
-          tabBarIcon: tabIcon(User),
-        }}
+        options={tabOptions('Profile', 'Settings', User)}
       />
     </Tab.Navigator>
   );

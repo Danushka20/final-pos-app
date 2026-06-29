@@ -7,6 +7,7 @@ import React, {
   useState,
 } from 'react';
 import { useAuth } from '@/context/AuthContext';
+import { useAutoRefresh } from '@/hooks/useAutoRefresh';
 import { settingsService } from '@/services/api/settingsService';
 import type { PosMobileSettings } from '@/types/settings';
 import { resolveCurrencyCode } from '@/utils/format';
@@ -31,26 +32,48 @@ export const PosSettingsProvider: React.FC<{ children: React.ReactNode }> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (silent = false) => {
     if (!isAuthenticated) {
       setSettings(null);
       return;
     }
-    setLoading(true);
-    setError(null);
+    if (!silent) {
+      setLoading(true);
+    }
+    if (!silent) {
+      setError(null);
+    }
     try {
       const data = await settingsService.loadAll();
       setSettings(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load settings');
+      if (!silent) {
+        setError(e instanceof Error ? e.message : 'Failed to load settings');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [isAuthenticated]);
 
   useEffect(() => {
-    refresh();
+    refresh(false);
   }, [refresh]);
+
+  useAutoRefresh({
+    onRefresh: silent => refresh(silent),
+    scopes: [
+      'dashboard',
+      'todayActivity',
+      'inventory',
+      'customers',
+      'purchases',
+      'expenses',
+      'sales',
+      'reports',
+    ],
+  });
 
   const currency = resolveCurrencyCode(settings?.company?.currency);
 

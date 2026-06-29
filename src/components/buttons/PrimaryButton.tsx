@@ -9,6 +9,8 @@ interface PrimaryButtonProps {
   loading?: boolean;
   disabled?: boolean;
   variant?: 'primary' | 'outline' | 'outlineLight' | 'ghost' | 'light';
+  /** Smaller button for dialogs/modals (no bottom margin). */
+  compact?: boolean;
 }
 
 export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
@@ -17,6 +19,7 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
   loading = false,
   disabled = false,
   variant = 'primary',
+  compact = false,
 }) => {
   const isDisabled = disabled || loading;
 
@@ -27,6 +30,7 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
         disabled={isDisabled}
         style={[
           styles.base,
+          compact && styles.compact,
           styles.outline,
           isDisabled && styles.disabled,
         ]}>
@@ -46,6 +50,7 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
         disabled={isDisabled}
         style={[
           styles.base,
+          compact && styles.compact,
           styles.outlineLight,
           isDisabled && styles.disabled,
         ]}>
@@ -71,7 +76,7 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
       <Pressable
         onPress={onPress}
         disabled={isDisabled}
-        style={[styles.base, styles.light, shadows.md, isDisabled && styles.disabled]}>
+        style={[styles.base, compact && styles.compact, styles.light, shadows.md, isDisabled && styles.disabled]}>
         {loading ? (
           <ActivityIndicator color={colors.primary} />
         ) : (
@@ -87,6 +92,7 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
       disabled={isDisabled}
       style={[
         styles.base,
+        compact && styles.compact,
         styles.primary,
         shadows.md,
         isDisabled && styles.disabled,
@@ -108,6 +114,11 @@ const styles = StyleSheet.create({
     height: 54,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  compact: {
+    height: 46,
+    marginBottom: 0,
+    borderRadius: 10,
   },
   primary: {
     backgroundColor: colors.primary,

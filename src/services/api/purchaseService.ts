@@ -21,6 +21,7 @@ export interface CreatePurchasePayload {
     qty: number;
     unit_price: number;
     line_total: number;
+    expiry_date?: string | null;
   }[];
 }
 

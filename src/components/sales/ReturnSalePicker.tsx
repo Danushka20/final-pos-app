@@ -94,7 +94,8 @@ export const ReturnSalePicker: React.FC = () => {
     <View style={[styles.pickCard, shadows.card]}>
       <Text style={styles.pickTitle}>Return from a sale bill</Text>
       <Text style={styles.pickHint}>
-        Choose any completed sale bill with items, or return without a bill.
+        Choose a completed sale bill with items left to return. Fully returned bills
+        are hidden.
       </Text>
 
       <View style={styles.searchRow}>
@@ -141,7 +142,7 @@ export const ReturnSalePicker: React.FC = () => {
       <SelectionModal
         visible={modalOpen}
         title="All sale bills"
-        emptyMessage="No completed sales with items found"
+        emptyMessage="No sale bills available to return"
         options={saleBills.map(s => ({
           id: String(s.id),
           label: s.sales_id,

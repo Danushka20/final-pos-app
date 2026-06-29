@@ -9,6 +9,7 @@ import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { AppHeader } from '@/components/common/AppHeader';
 import { PrimaryButton } from '@/components/buttons/PrimaryButton';
 import { SaleReceiptView } from '@/components/sales/SaleReceiptView';
+import { ReceiptActions } from '@/components/sales/ReceiptBottomBar';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
@@ -17,6 +18,7 @@ import {
   downloadReceiptAsImage,
   shareReceiptImageFile,
 } from '@/utils/receiptImageShare';
+import { TAB_BAR_SCROLL_PADDING } from '@/theme';
 import type { SalesStackParamList } from '@/navigation/types';
 
 type Route = RouteProp<SalesStackParamList, 'SaleReceipt'>;
@@ -32,6 +34,17 @@ export const SaleReceiptScreen: React.FC = () => {
   const [printing, setPrinting] = useState(false);
   const [savingImage, setSavingImage] = useState(false);
   const receiptShotRef = useRef<ViewShotRef>(null);
+
+  const canPrint = bluetoothPrintService.isSupported();
+
+  const goNewSale = () => {
+    navigation.dispatch(
+      CommonActions.reset({
+        index: 0,
+        routes: [{ name: 'SalesPOS' }],
+      }),
+    );
+  };
 
   const promptPrinterSetup = (message: string) => {
     showConfirm({
@@ -100,7 +113,7 @@ export const SaleReceiptScreen: React.FC = () => {
   return (
     <ScreenContainer>
       <AppHeader
-        title="Bill / Receipt"
+        title="Sales receipt"
         subtitle={params.receipt.sale.sales_id}
         showBack
       />
@@ -110,7 +123,7 @@ export const SaleReceiptScreen: React.FC = () => {
           padding: 16,
           alignItems: 'center',
         }}
-        contentPaddingBottom={40}>
+        contentPaddingBottom={TAB_BAR_SCROLL_PADDING}>
         <View style={{ width: '100%', maxWidth: 400 }} collapsable={false}>
           <ViewShot
             ref={receiptShotRef}
@@ -119,7 +132,8 @@ export const SaleReceiptScreen: React.FC = () => {
             <SaleReceiptView receipt={params.receipt} settings={settings} />
           </ViewShot>
         </View>
-        <Box w="100%" maxWidth={400} gap="$2">
+
+        <Box w="100%" maxWidth={400} gap="$2" mt="$3">
           <PrimaryButton
             label={savingImage ? 'Saving…' : 'Download receipt image'}
             variant="outline"
@@ -132,24 +146,12 @@ export const SaleReceiptScreen: React.FC = () => {
             onPress={handleShareImage}
             disabled={savingImage}
           />
-          {bluetoothPrintService.isSupported() ? (
-            <PrimaryButton
-              label={printing ? 'Printing…' : 'Print via Bluetooth'}
-              onPress={handlePrint}
-              loading={printing}
-            />
-          ) : null}
-          <PrimaryButton
-            label="New sale"
-            variant={bluetoothPrintService.isSupported() ? 'outline' : 'primary'}
-            onPress={() =>
-              navigation.dispatch(
-                CommonActions.reset({
-                  index: 0,
-                  routes: [{ name: 'SalesPOS' }],
-                }),
-              )
-            }
+
+          <ReceiptActions
+            showPrint={canPrint}
+            onPrint={canPrint ? handlePrint : undefined}
+            onNewSale={goNewSale}
+            printLoading={printing}
           />
         </Box>
       </SmoothScrollView>

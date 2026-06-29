@@ -30,13 +30,14 @@ export const PurchaseCreateScreen: React.FC = () => {
   const { showError } = useErrorDialog();
   const { currency } = usePosSettings();
   const purchase = usePurchaseCreateContext();
+  const { error: purchaseError, setError: setPurchaseError } = purchase;
 
   useEffect(() => {
-    if (purchase.error) {
-      showError({ title: 'Purchase', message: purchase.error });
-      purchase.setError(null);
+    if (purchaseError) {
+      showError({ title: 'Purchase', message: purchaseError });
+      setPurchaseError(null);
     }
-  }, [purchase.error, purchase.setError, showError]);
+  }, [purchaseError, setPurchaseError, showError]);
 
   const selectedCount = useMemo(
     () => purchase.cart.reduce((n, line) => n + line.qty, 0),
@@ -101,7 +102,7 @@ export const PurchaseCreateScreen: React.FC = () => {
               onAddItem={item => purchase.toggleCartItem(item)}
               onRemoveItem={item => purchase.decrementCartQty(item.id)}
               onRemoveAll={item => purchase.removeFromCart(item.id)}
-              getCartQty={purchase.getCartQty}
+              getCartQty={item => purchase.getCartQty(item.id)}
               cartRevision={cartRevision}
               getDisplayPrice={purchase.getDisplayPrice}
               ignoreStock

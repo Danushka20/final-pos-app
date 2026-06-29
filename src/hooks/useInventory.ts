@@ -113,7 +113,7 @@ export const useInventory = () => {
 
   useAutoRefresh({
     onRefresh: silent => load(silent),
-    scopes: ['inventory', 'sales', 'dashboard'],
+    scopes: ['inventory', 'sales', 'dashboard', 'purchases', 'reports'],
   });
 
   useEffect(() => {

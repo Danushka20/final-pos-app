@@ -60,6 +60,8 @@ export function buildPurchaseReceiptPayload(input: {
         qty: line.qty,
         unit_price: line.unit_price,
         line_total: line.line_total,
+        uom: line.uom?.trim() || 'Pcs',
+        expiry_date: line.expiry_date?.trim() || null,
       })),
     },
   };

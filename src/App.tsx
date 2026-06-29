@@ -11,6 +11,8 @@ import { GluestackProvider } from '@/components/ui/GluestackProvider';
 import { AppPaperProvider } from '@/components/ui/PaperProvider';
 import { AuthProvider } from '@/context/AuthContext';
 import { DataRefreshProvider } from '@/context/DataRefreshContext';
+import { GlobalDataSync } from '@/components/common/GlobalDataSync';
+import { AppStartupSetup } from '@/components/common/AppStartupSetup';
 import { ErrorDialogProvider } from '@/context/ErrorDialogContext';
 import { ToastProvider } from '@/context/ToastContext';
 import { AppAlertProvider } from '@/context/AppAlertContext';
@@ -33,6 +35,8 @@ function AppRoot(): React.JSX.Element {
                 <AuthProvider>
                   <AppAlertProvider>
                     <DataRefreshProvider>
+                      <GlobalDataSync />
+                      <AppStartupSetup />
                       <RootNavigator />
                     </DataRefreshProvider>
                   </AppAlertProvider>

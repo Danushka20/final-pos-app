@@ -73,7 +73,7 @@ export const useDashboard = () => {
 
   useAutoRefresh({
     onRefresh: silent => load(silent),
-    scopes: ['dashboard', 'todayActivity'],
+    scopes: ['dashboard', 'todayActivity', 'sales', 'purchases', 'inventory', 'reports'],
   });
 
   const metrics = overview?.metrics;

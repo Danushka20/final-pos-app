@@ -15,6 +15,7 @@ import { PaperSegmentFilter } from '@/components/common/PaperSegmentFilter';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { AppHeader } from '@/components/common/AppHeader';
 import { SmoothScrollView } from '@/components/common/SmoothScrollView';
+import { PrimaryButton } from '@/components/buttons/PrimaryButton';
 import { LoadingOverlay } from '@/components/common/LoadingOverlay';
 import { TodayActivityTabs } from '@/components/dashboard/TodayActivityTabs';
 import {
@@ -25,7 +26,11 @@ import {
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
 import { useTodayActivity } from '@/hooks/useTodayActivity';
+import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
+import { navigateToPrinterSetup } from '@/navigation/navigationRef';
 import { formatCurrency, formatNumber } from '@/utils/format';
+import type { DailyReceiptKind } from '@/utils/dailyReceiptEscPos';
+import type { SystemReportHeader } from '@/types/reports';
 import { colors, shadows, typography, TAB_BAR_SCROLL_PADDING } from '@/theme';
 import type { HomeStackParamList } from '@/navigation/types';
 import type { TodayActivityTab } from '@/navigation/types';
@@ -35,13 +40,29 @@ type TodaySalesFilter = 'all' | 'sale' | 'return';
 
 type Route = RouteProp<HomeStackParamList, 'TodayActivity'>;
 
+const isPrinterSetupError = (msg: string): boolean =>
+  /no printer|not configured|settings/i.test(msg);
+
+const buildHeader = (settings: ReturnType<typeof usePosSettings>['settings']): SystemReportHeader => ({
+  company_name:
+    settings?.printHeader?.company_name ??
+    settings?.company?.name ??
+    'Business Report',
+  address:
+    settings?.printHeader?.address_line ?? settings?.company?.address ?? undefined,
+  phone: settings?.printHeader?.phone ?? settings?.company?.phone ?? undefined,
+  email: settings?.printHeader?.email ?? settings?.company?.email ?? undefined,
+  tax_id: settings?.printHeader?.tax_id ?? settings?.company?.tax_id ?? undefined,
+});
+
 export const TodayActivityScreen: React.FC = () => {
   const route = useRoute<Route>();
-  const { showError } = useErrorDialog();
-  const { currency } = usePosSettings();
+  const { showError, showConfirm } = useErrorDialog();
+  const { currency, settings } = usePosSettings();
   const { data, loading, refreshing, error, refresh } = useTodayActivity();
   const [tab, setTab] = useState<TodayActivityTab>(route.params?.tab ?? 'sales');
   const [salesFilter, setSalesFilter] = useState<TodaySalesFilter>('all');
+  const [printing, setPrinting] = useState(false);
 
   useEffect(() => {
     if (route.params?.tab) {
@@ -81,6 +102,7 @@ export const TodayActivityScreen: React.FC = () => {
     }
     return data.today_sales;
   }, [data.today_sales, salesFilter]);
+
   const dateLabel = data.date
     ? new Date(`${data.date}T12:00:00`).toLocaleDateString(undefined, {
         weekday: 'long',
@@ -89,6 +111,65 @@ export const TodayActivityScreen: React.FC = () => {
         year: 'numeric',
       })
     : 'Today';
+
+  const printKind: DailyReceiptKind | null =
+    tab === 'purchases'
+      ? 'purchases'
+      : tab === 'sales' && salesFilter === 'return'
+        ? 'refunds'
+        : tab === 'sales'
+          ? 'sales'
+          : null;
+
+  const printLabel =
+    printKind === 'purchases'
+      ? 'Print daily purchase receipt'
+      : printKind === 'refunds'
+        ? 'Print daily refund receipt'
+        : printKind === 'sales'
+          ? 'Print daily sales receipt'
+          : '';
+
+  const handlePrintDaily = async () => {
+    if (!printKind) {
+      return;
+    }
+    setPrinting(true);
+    try {
+      if (!bluetoothPrintService.isSupported()) {
+        showConfirm({
+          title: 'Printer not set up',
+          message: 'Configure a receipt printer in Settings → Receipt printer.',
+          confirmLabel: 'Open printer setup',
+          cancelLabel: 'Cancel',
+          onConfirm: () => navigateToPrinterSetup(),
+        });
+        return;
+      }
+      await bluetoothPrintService.printDailyReceipt(
+        printKind,
+        data,
+        buildHeader(settings),
+        currency,
+        settings,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Print failed';
+      if (isPrinterSetupError(msg)) {
+        showConfirm({
+          title: 'Printer not set up',
+          message: msg,
+          confirmLabel: 'Open printer setup',
+          cancelLabel: 'Cancel',
+          onConfirm: () => navigateToPrinterSetup(),
+        });
+      } else {
+        showError({ title: 'Print', message: msg, variant: 'warning' });
+      }
+    } finally {
+      setPrinting(false);
+    }
+  };
 
   const summaryConfig =
     tab === 'sales'
@@ -131,6 +212,8 @@ export const TodayActivityScreen: React.FC = () => {
         <LoadingOverlay message="Loading today's data…" />
       ) : null}
 
+      {printing ? <LoadingOverlay message="Printing receipt…" /> : null}
+
       <SmoothScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -163,6 +246,17 @@ export const TodayActivityScreen: React.FC = () => {
               reorder: summary.reorder_items_count,
             }}
           />
+
+          {printKind ? (
+            <View style={styles.printWrap}>
+              <PrimaryButton
+                label={printing ? 'Printing…' : printLabel}
+                onPress={handlePrintDaily}
+                loading={printing}
+                disabled={printing}
+              />
+            </View>
+          ) : null}
 
           {tab === 'sales' ? (
             <>
@@ -265,5 +359,8 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: 4,
     fontWeight: '600',
+  },
+  printWrap: {
+    marginBottom: 12,
   },
 });

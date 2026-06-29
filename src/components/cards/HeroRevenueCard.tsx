@@ -1,5 +1,4 @@
 import React from 'react';
-import { StyleSheet } from 'react-native';
 import { TrendingUp } from 'lucide-react-native';
 import { Box, HStack, Text, VStack } from '@gluestack-ui/themed';
 import { colors, shadows } from '@/theme';

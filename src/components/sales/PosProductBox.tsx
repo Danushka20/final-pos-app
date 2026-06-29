@@ -2,8 +2,12 @@ import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { Text } from 'react-native-paper';
-import { Minus, Package, Plus } from 'lucide-react-native';
+import { Minus, Layers, Package, Plus } from 'lucide-react-native';
+import { PosItemExpiryChip } from '@/components/sales/PosItemExpiryChip';
 import { formatCurrency } from '@/utils/format';
+import { itemHasBatches } from '@/utils/batchUtils';
+import { isItemExpired } from '@/utils/expiryUtils';
+import { resolveLineUom } from '@/utils/uom';
 import { colors, radius, shadows, typography } from '@/theme';
 import type { InventoryItem } from '@/types/sales';
 
@@ -14,7 +18,11 @@ interface PosProductBoxProps {
   disabled?: boolean;
   displayPrice?: number;
   ignoreStock?: boolean;
+  hasOffer?: boolean;
+  hasBatches?: boolean;
+  onOpenBatches?: (item: InventoryItem) => void;
   onAdd: (item: InventoryItem) => void;
+  onIncrement?: (item: InventoryItem) => void;
   onRemove: (item: InventoryItem) => void;
   onRemoveAll?: (item: InventoryItem) => void;
 }
@@ -26,16 +34,53 @@ export const PosProductBox: React.FC<PosProductBoxProps> = ({
   disabled = false,
   displayPrice,
   ignoreStock = false,
+  hasOffer = false,
+  hasBatches = false,
+  onOpenBatches,
   onAdd,
+  onIncrement,
   onRemove,
   onRemoveAll,
 }) => {
   const outOfStock = (item.qty ?? 0) <= 0;
-  const cannotSell = disabled || (!ignoreStock && outOfStock);
+  const expired = !ignoreStock && isItemExpired(item) && !itemHasBatches(item);
+  const cannotSell = disabled || (!ignoreStock && (outOfStock || expired));
   const price = displayPrice ?? item.selling_price;
   const inCart = cartQty > 0;
   const code = item.item_number || String(item.id);
   const categoryLine = [item.category, item.sub_category].filter(Boolean).join(' · ');
+  const uom = resolveLineUom(item.uom);
+  const stockLine =
+    !ignoreStock && item.qty != null
+      ? `Stock ${item.qty} ${uom}`
+      : uom
+        ? `Unit: ${uom}`
+        : '';
+  const showBatchControl = Boolean(onOpenBatches) && (hasBatches || itemHasBatches(item));
+
+  const openBatches = () => {
+    onOpenBatches?.(item);
+  };
+
+  const batchButton = showBatchControl ? (
+    <TouchableOpacity
+      activeOpacity={0.8}
+      onPress={openBatches}
+      style={[
+        styles.batchBtn,
+        inCart && styles.batchBtnCompact,
+        inCart && styles.batchBtnInCart,
+      ]}
+      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+      accessibilityLabel="Open batch list">
+      <Layers
+        size={inCart ? 11 : 10}
+        color={inCart ? colors.primary : colors.textOnPrimary}
+        strokeWidth={2.5}
+      />
+      {!inCart ? <Text style={styles.batchBtnText}>Batch</Text> : null}
+    </TouchableOpacity>
+  ) : null;
 
   return (
     <View
@@ -44,8 +89,15 @@ export const PosProductBox: React.FC<PosProductBoxProps> = ({
         shadows.card,
         inCart && styles.cardSelected,
         cannotSell && styles.cardDisabled,
+        expired && styles.cardExpired,
       ]}>
-      <View style={[styles.topBar, cannotSell && styles.topBarMuted]} />
+      <View style={[styles.topBar, cannotSell && styles.topBarMuted, expired && styles.topBarExpired]} />
+
+      {hasOffer && !inCart ? (
+        <View style={styles.offerBadge}>
+          <Text style={styles.offerBadgeText}>Offer</Text>
+        </View>
+      ) : null}
 
       {inCart ? (
         <View style={styles.qtyBadge}>
@@ -54,8 +106,16 @@ export const PosProductBox: React.FC<PosProductBoxProps> = ({
       ) : null}
 
       <Pressable
-        onPress={() => !cannotSell && onAdd(item)}
-        onLongPress={() => inCart && (onRemoveAll ?? onRemove)(item)}
+        onPress={() => {
+          if (!cannotSell) {
+            onAdd(item);
+          }
+        }}
+        onLongPress={() => {
+          if (inCart) {
+            (onRemoveAll ?? onRemove)(item);
+          }
+        }}
         delayLongPress={400}
         disabled={cannotSell}
         style={({ pressed }) => [
@@ -77,30 +137,42 @@ export const PosProductBox: React.FC<PosProductBoxProps> = ({
           {item.description}
         </Text>
 
-        {categoryLine ? (
+        <PosItemExpiryChip item={item} />
+
+        {categoryLine || stockLine ? (
           <View style={styles.metaFrame}>
-            <Text style={styles.meta} numberOfLines={1}>
-              {categoryLine}
+            <Text style={styles.meta} numberOfLines={2}>
+              {[categoryLine, stockLine].filter(Boolean).join(' · ')}
             </Text>
           </View>
         ) : null}
 
-        {!ignoreStock && outOfStock ? (
+        {!ignoreStock && expired ? (
+          <View style={styles.outFrame}>
+            <Text style={styles.outLabel}>Expired</Text>
+          </View>
+        ) : !ignoreStock && outOfStock ? (
           <View style={styles.outFrame}>
             <Text style={styles.outLabel}>Out of stock</Text>
           </View>
         ) : null}
 
         {inCart ? (
-          <Text style={styles.hint}>Hold to remove all</Text>
+          <Text style={styles.hint}>Hold to remove</Text>
         ) : (
           <Text style={styles.hint}>Tap to add</Text>
         )}
       </Pressable>
 
-      <View style={[styles.priceFrame, inCart && styles.priceFrameSelected]}>
+      <View
+        style={[
+          styles.priceFrame,
+          inCart && styles.priceFrameSelected,
+          showBatchControl && !inCart && styles.priceFrameWithBatch,
+        ]}>
         {inCart ? (
           <View style={styles.qtyRow}>
+            {batchButton}
             <TouchableOpacity
               activeOpacity={0.75}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -115,7 +187,7 @@ export const PosProductBox: React.FC<PosProductBoxProps> = ({
             <TouchableOpacity
               activeOpacity={0.75}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              onPress={() => !cannotSell && onAdd(item)}
+              onPress={() => !cannotSell && (onIncrement ?? onAdd)(item)}
               disabled={cannotSell}
               style={[styles.qtyBtn, cannotSell && styles.qtyBtnDisabled]}
               accessibilityLabel="Add one">
@@ -123,9 +195,16 @@ export const PosProductBox: React.FC<PosProductBoxProps> = ({
             </TouchableOpacity>
           </View>
         ) : (
-          <Text style={[styles.price, cannotSell && styles.priceMuted]}>
-            {formatCurrency(price, currency)}
-          </Text>
+          <View style={styles.priceFooter}>
+            <Text
+              style={[styles.price, cannotSell && styles.priceMuted]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.72}>
+              {formatCurrency(price, currency)}
+            </Text>
+            {batchButton ? <View style={styles.batchBtnRow}>{batchButton}</View> : null}
+          </View>
         )}
       </View>
     </View>
@@ -151,6 +230,9 @@ const styles = StyleSheet.create({
   cardDisabled: {
     opacity: 0.52,
   },
+  cardExpired: {
+    backgroundColor: colors.errorSoft,
+  },
   cardPressed: {
     backgroundColor: colors.primarySoft,
   },
@@ -161,6 +243,62 @@ const styles = StyleSheet.create({
   },
   topBarMuted: {
     backgroundColor: colors.borderStrong,
+  },
+  topBarExpired: {
+    backgroundColor: colors.error,
+  },
+  offerBadge: {
+    position: 'absolute',
+    top: 10,
+    left: 8,
+    zIndex: 8,
+    backgroundColor: colors.success,
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  offerBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: colors.white,
+    letterSpacing: 0.3,
+  },
+  priceFooter: {
+    width: '100%',
+    alignItems: 'center',
+    gap: 5,
+  },
+  batchBtnRow: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  batchBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: colors.primary,
+    borderRadius: 7,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    ...shadows.sm,
+  },
+  batchBtnCompact: {
+    width: 30,
+    height: 30,
+    minWidth: 30,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    justifyContent: 'center',
+    borderRadius: 8,
+  },
+  batchBtnInCart: {
+    backgroundColor: colors.white,
+  },
+  batchBtnText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: colors.textOnPrimary,
+    letterSpacing: 0.2,
   },
   qtyBadge: {
     position: 'absolute',
@@ -187,7 +325,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 10,
     paddingTop: 10,
-    paddingBottom: 6,
+    paddingBottom: 4,
     alignItems: 'center',
   },
   iconFrame: {
@@ -288,6 +426,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 4,
   },
+  priceFrameWithBatch: {
+    minHeight: 56,
+    paddingVertical: 6,
+  },
   priceFrameSelected: {
     backgroundColor: colors.text,
     borderTopColor: colors.text,
@@ -296,8 +438,9 @@ const styles = StyleSheet.create({
     ...typography.label,
     fontWeight: '800',
     color: colors.text,
-    fontSize: 13,
+    fontSize: 12,
     textAlign: 'center',
+    width: '100%',
   },
   priceMuted: {
     color: colors.textMuted,

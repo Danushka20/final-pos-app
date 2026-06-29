@@ -3,7 +3,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import RNBlobUtil from 'react-native-blob-util';
 import { buildEscPosPrintText, type PrintableReceipt } from '@/utils/receiptEscPos';
 import { buildEscPosReport } from '@/utils/reportEscPos';
+import { buildEscPosBackendReport } from '@/utils/backendReportEscPos';
+import {
+  buildDailyReceiptEscPos,
+  type DailyReceiptKind,
+} from '@/utils/dailyReceiptEscPos';
+import type { TodayTablesPayload } from '@/types/dashboard';
 import type { SystemReportPayload } from '@/types/reports';
+import type { BackendReportData } from '@/types/backendReports';
+import type { SystemReportHeader } from '@/types/reports';
 import { receiptPrintStorage } from '@/services/storage/receiptPrintStorage';
 import { mergeReceiptPrintSettings } from '@/utils/receiptPrintCustomization';
 import { buildEscPosRasterBase64FromJpeg } from '@/utils/escPosRasterImage';
@@ -634,6 +642,77 @@ export const bluetoothPrintService = {
     }
 
     const text = buildEscPosReport(report, {
+      currency,
+      customization,
+      settings,
+    });
+    await sendRawText(saved.type, text, saved.profile);
+  },
+
+  async printBackendReport(
+    report: BackendReportData,
+    header: SystemReportHeader,
+    currency?: string,
+    settings?: PosMobileSettings | null,
+  ): Promise<void> {
+    if (!(await this.isConfigured())) {
+      throw new Error(
+        'No printer configured. Set up your printer in Settings → Receipt printer.',
+      );
+    }
+
+    const saved = await resolveSavedPrinter();
+    const localCustomization = await receiptPrintStorage.get();
+    const customization = mergeReceiptPrintSettings(settings, localCustomization);
+    const logo = await resolveReceiptLogo(null, settings);
+
+    await connectAndPrepare(saved.type, saved.address, saved.profile);
+
+    if (customization.showLogo && logo) {
+      try {
+        await printResolvedLogo(saved.type, logo, saved.profile);
+      } catch {
+        /* continue with text if logo print fails */
+      }
+    }
+
+    const text = buildEscPosBackendReport(report, header, {
+      currency,
+      customization,
+      settings,
+    });
+    await sendRawText(saved.type, text, saved.profile);
+  },
+
+  async printDailyReceipt(
+    kind: DailyReceiptKind,
+    data: TodayTablesPayload,
+    header: SystemReportHeader,
+    currency?: string,
+    settings?: PosMobileSettings | null,
+  ): Promise<void> {
+    if (!(await this.isConfigured())) {
+      throw new Error(
+        'No printer configured. Set up your printer in Settings → Receipt printer.',
+      );
+    }
+
+    const saved = await resolveSavedPrinter();
+    const localCustomization = await receiptPrintStorage.get();
+    const customization = mergeReceiptPrintSettings(settings, localCustomization);
+    const logo = await resolveReceiptLogo(null, settings);
+
+    await connectAndPrepare(saved.type, saved.address, saved.profile);
+
+    if (customization.showLogo && logo) {
+      try {
+        await printResolvedLogo(saved.type, logo, saved.profile);
+      } catch {
+        /* continue */
+      }
+    }
+
+    const text = buildDailyReceiptEscPos(kind, data, header, {
       currency,
       customization,
       settings,

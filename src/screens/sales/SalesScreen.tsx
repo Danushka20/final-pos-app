@@ -10,12 +10,14 @@ import { PosSalesHeader } from '@/components/sales/PosSalesHeader';
 import { SaleModeToggle } from '@/components/sales/SaleModeToggle';
 import { ReturnSalePicker } from '@/components/sales/ReturnSalePicker';
 import { PosProductGrid } from '@/components/sales/PosProductGrid';
+import { PosBatchSelectModal } from '@/components/sales/PosBatchSelectModal';
 import { FloatingCartFab } from '@/components/sales/FloatingCartFab';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSaleContext } from '@/context/PosSaleContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
 import { colors, FLOATING_FAB_HEIGHT, TAB_BAR_SCROLL_PADDING } from '@/theme';
 import type { SalesStackParamList } from '@/navigation/types';
+import type { InventoryItem } from '@/types/sales';
 
 const FLOATING_CART_HEIGHT = FLOATING_FAB_HEIGHT + 20;
 
@@ -26,13 +28,14 @@ export const SalesScreen: React.FC = () => {
   const { showError } = useErrorDialog();
   const { currency } = usePosSettings();
   const pos = usePosSaleContext();
+  const { error: posError, setError: setPosError } = pos;
 
   useEffect(() => {
-    if (pos.error) {
-      showError({ title: 'POS', message: pos.error });
-      pos.setError(null);
+    if (posError) {
+      showError({ title: 'POS', message: posError });
+      setPosError(null);
     }
-  }, [pos.error, pos.setError, showError]);
+  }, [posError, setPosError, showError]);
 
   const selectedCount = useMemo(
     () => pos.cart.reduce((n, line) => n + line.qty, 0),
@@ -70,9 +73,20 @@ export const SalesScreen: React.FC = () => {
   };
 
   const cartRevision = useMemo(
-    () => pos.cart.map(line => `${line.item_id}:${line.qty}`).join('|'),
+    () =>
+      pos.cart
+        .map(
+          line =>
+            `${line.item_id}:${line.item_batch_id ?? 'main'}:${line.qty}`,
+        )
+        .join('|'),
     [pos.cart],
   );
+
+  const handleOpenBatchTable = (item: InventoryItem) => {
+    Keyboard.dismiss();
+    void pos.openBatchPicker(item, 1);
+  };
 
   const listBottomInset =
     selectedCount > 0
@@ -84,6 +98,8 @@ export const SalesScreen: React.FC = () => {
       <PosSalesHeader
         title={pos.isReturn ? 'Return' : 'Items'}
         badge={pos.salesId ? `#${pos.salesId}` : undefined}
+        holdOrdersLabel="Hold list"
+        onHoldOrdersPress={pos.isReturn ? undefined : () => navigation.navigate('HoldOrders')}
       />
 
       {pos.loading || pos.loadingReturnSale ? (
@@ -131,12 +147,26 @@ export const SalesScreen: React.FC = () => {
               refreshing={pos.isReturn ? false : pos.itemsRefreshing}
               onRefresh={pos.isReturn ? () => {} : pos.refreshProducts}
               onAddItem={item => pos.tryAddToCart(item, 1)}
-              onRemoveItem={item => pos.decrementCartQty(item.id)}
-              onRemoveAll={item => pos.removeFromCart(item.id)}
-              getCartQty={pos.getCartQty}
+              onIncrementItem={item => pos.tryAddToCart(item, 1)}
+              onRemoveItem={item =>
+                pos.decrementCartQty(item.id, item.sale_line_batch_id ?? null)
+              }
+              onRemoveAll={item =>
+                pos.removeFromCart(item.id, item.sale_line_batch_id ?? null)
+              }
+              onOpenBatches={
+                pos.isReturn ? undefined : handleOpenBatchTable
+              }
+              batchItemIds={pos.batchItemIds}
+              getCartQty={item =>
+                item.return_line_key != null
+                  ? pos.getCartLineQty(item.id, item.sale_line_batch_id ?? null)
+                  : pos.getCartQty(item.id)
+              }
               cartRevision={cartRevision}
               canSellItem={item => pos.canSellItem(item, 1).ok}
               ignoreStock={pos.isReturn}
+              offerProductItemIds={pos.isReturn ? undefined : pos.offerProductItemIds}
               bottomInset={listBottomInset}
             />
           ) : (
@@ -151,6 +181,21 @@ export const SalesScreen: React.FC = () => {
         currency={currency}
         isReturn={pos.isReturn}
         onPress={openOrder}
+      />
+
+      <PosBatchSelectModal
+        visible={pos.batchPickerOpen}
+        item={pos.batchPickerItem}
+        batches={pos.batchPickerBatches}
+        loading={pos.batchPickerLoading}
+        error={pos.batchPickerError}
+        currency={currency}
+        branchLocation={pos.location}
+        defaultQty={pos.batchPickerQty}
+        allowNegativeInventory={pos.allowNegativeInventory}
+        onClose={pos.closeBatchPicker}
+        onSelectMainProduct={pos.addMainFromBatchPicker}
+        onSelectBatch={pos.addBatchFromPicker}
       />
     </ScreenContainer>
   );

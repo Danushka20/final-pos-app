@@ -12,6 +12,7 @@ import { usePosSettings } from '@/context/PosSettingsContext';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
 import { receiptLogoStorage } from '@/services/storage/receiptLogoStorage';
 import { receiptPrintStorage } from '@/services/storage/receiptPrintStorage';
+import { RECEIPT_SOFTWARE_PROVIDER } from '@/constants/receiptBranding';
 import { pickReceiptLogoFromGallery } from '@/utils/pickReceiptLogo';
 import { resolveReceiptLogo } from '@/utils/receiptLogoResolver';
 import {
@@ -244,10 +245,11 @@ export const ReceiptCustomizeScreen: React.FC = () => {
               ) : null}
               <Text style={styles.previewMono}>{previewTitle}</Text>
               <Text style={styles.previewMono}>----------------</Text>
-              <Text style={styles.previewMono}>TAX INVOICE</Text>
+              <Text style={styles.previewMono}>SALES RECEIPT</Text>
               <Text style={styles.previewMono}>Item ........ 100.00</Text>
               <Text style={styles.previewMono}>----------------</Text>
               <Text style={styles.previewMono}>{previewFooter}</Text>
+              <Text style={styles.previewMono}>{RECEIPT_SOFTWARE_PROVIDER}</Text>
             </Box>
             <Text fontSize="$xs" color="$textLight400" mt="$2">
               Printed output uses ESC/POS center/bold tags — fixes left-aligned headers on thermal

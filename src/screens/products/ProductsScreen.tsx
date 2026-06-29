@@ -1,10 +1,10 @@
 import React, { useEffect } from 'react';
-import { RefreshControl, TextInput, TouchableOpacity } from 'react-native';
+import { RefreshControl, TextInput } from 'react-native';
 import { Box, HStack, Pressable, Text, VStack } from '@gluestack-ui/themed';
 import { SmoothFlatList } from '@/components/common/SmoothFlatList';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Package, Truck } from 'lucide-react-native';
+import { Package, SlidersHorizontal, Truck } from 'lucide-react-native';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { AppHeader } from '@/components/common/AppHeader';
 import { FilterChips } from '@/components/common/FilterChips';
@@ -34,7 +34,7 @@ export const ProductsScreen: React.FC = () => {
   const categoryOptions = inv.categories.map(c => c.name);
 
   const renderItem = ({ item }: { item: InventoryItem }) => (
-    <Box
+    <Pressable
       mx="$4"
       mb="$3"
       bg={colors.white}
@@ -42,7 +42,9 @@ export const ProductsScreen: React.FC = () => {
       p="$4"
       borderWidth={1}
       borderColor={colors.border}
-      style={shadows.card}>
+      style={shadows.card}
+      onPress={() => navigation.push('ItemForm', { itemId: Number(item.id) })}
+      accessibilityLabel={`Modify ${item.description}`}>
       <HStack justifyContent="space-between" alignItems="flex-start">
         <VStack flex={1} pr="$2">
           <Text fontWeight="$bold" color={colors.text}>
@@ -68,10 +70,13 @@ export const ProductsScreen: React.FC = () => {
             }
             mt="$0.5">
             Qty {item.qty ?? 0} {item.uom ?? ''}
+            {(item.has_batches || (item.batch_count ?? 0) > 0)
+              ? ` · ${item.batch_count ?? 0} batch${(item.batch_count ?? 0) === 1 ? '' : 'es'}`
+              : ''}
           </Text>
         </VStack>
       </HStack>
-    </Box>
+    </Pressable>
   );
 
   return (
@@ -79,11 +84,20 @@ export const ProductsScreen: React.FC = () => {
       <AppHeader
         title="Inventory"
         rightSlot={
-          <TouchableOpacity
-            onPress={() => navigation.navigate('PurchasesList')}
-            style={{ padding: 8 }}>
-            <Truck size={22} color={colors.text} />
-          </TouchableOpacity>
+          <HStack alignItems="center" gap="$1">
+            <Pressable
+              onPress={() => navigation.navigate('InventoryActivity')}
+              p="$2"
+              accessibilityLabel="Inventory activity">
+              <SlidersHorizontal size={22} color={colors.text} />
+            </Pressable>
+            <Pressable
+              onPress={() => navigation.navigate('PurchasesList')}
+              p="$2"
+              accessibilityLabel="Purchases">
+              <Truck size={22} color={colors.text} />
+            </Pressable>
+          </HStack>
         }
       />
 

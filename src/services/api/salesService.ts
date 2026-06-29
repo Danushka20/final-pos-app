@@ -5,6 +5,7 @@ import type {
   PosContext,
   SaleReceiptPayload,
   SaleRecord,
+  InventoryItem,
 } from '@/types/sales';
 import { TRANSACTION_TYPE_SALE } from '@/types/sales';
 
@@ -12,7 +13,11 @@ export interface SalesListResult {
   sales: SaleRecord[];
   summary?: { total_orders: number; total_sales_amount: number };
 }
-import type { InventoryItem } from '@/types/sales';
+
+export interface HoldOrdersResult {
+  hold_orders: SaleRecord[];
+  order_settings?: Record<string, unknown>;
+}
 
 export const salesService = {
   async getPosContext(): Promise<PosContext> {
@@ -55,7 +60,6 @@ export const salesService = {
     >('/sales', {
       ...payload,
       transaction_type: payload.transaction_type ?? TRANSACTION_TYPE_SALE,
-      refund_card_last4: payload.refund_card_last4 ?? undefined,
       order_status: payload.order_status ?? 'completed',
       sales_type: payload.sales_type ?? 'Retail',
       pricing_mode: payload.pricing_mode ?? 'retail',
@@ -71,16 +75,6 @@ export const salesService = {
     }
 
     return { sale: data.data, receipt: data.receipt };
-  },
-
-  async verifyRefundCard(cardLast4: string): Promise<void> {
-    const { data } = await apiClient.post<ApiSuccessResponse<unknown>>(
-      '/sales/verify-refund-card',
-      { card_last4: cardLast4 },
-    );
-    if (!data.success) {
-      throw new Error(data.message ?? 'Card verification failed');
-    }
   },
 
   async listSales(params?: {
@@ -119,5 +113,52 @@ export const salesService = {
       throw new Error(data.message ?? 'Failed to load receipt');
     }
     return data.data;
+  },
+
+  async getHoldOrders(location?: string): Promise<HoldOrdersResult> {
+    const { data } = await apiClient.get<
+      ApiSuccessResponse<HoldOrdersResult>
+    >('/sales/hold-orders', {
+      params: location ? { location } : undefined,
+    });
+    if (!data.success || !data.data) {
+      throw new Error(data.message ?? 'Failed to load hold orders');
+    }
+    return data.data;
+  },
+
+  async completeHold(
+    saleId: number,
+    payload: CreateSalePayload,
+  ): Promise<{ sale: SaleRecord; receipt: SaleReceiptPayload }> {
+    const { data } = await apiClient.post<
+      ApiSuccessResponse<SaleRecord> & { receipt?: SaleReceiptPayload }
+    >(`/sales/${saleId}/complete-hold`, {
+      ...payload,
+      order_status: 'completed',
+    });
+    if (!data.success || !data.data) {
+      throw new Error(data.message ?? 'Failed to complete hold order');
+    }
+    if (!data.receipt) {
+      const receipt = await salesService.getReceipt(data.data.id);
+      return { sale: data.data, receipt };
+    }
+    return { sale: data.data, receipt: data.receipt };
+  },
+
+  async deleteHoldOrder(
+    saleId: number,
+    holdPin?: string | null,
+  ): Promise<void> {
+    const { data } = await apiClient.delete<ApiSuccessResponse<null>>(
+      `/sales/${saleId}`,
+      {
+        data: holdPin?.trim() ? { hold_pin: holdPin.trim() } : undefined,
+      },
+    );
+    if (!data.success) {
+      throw new Error(data.message ?? 'Failed to delete hold order');
+    }
   },
 };

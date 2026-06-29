@@ -1,8 +1,15 @@
+import {
+  DEFAULT_RECEIPT_STORE_NAME,
+  getSaleReceiptTitle,
+  PURCHASE_RECEIPT_TITLE,
+  RECEIPT_SOFTWARE_PROVIDER,
+} from '@/constants/receiptBranding';
 import type { SaleReceiptPayload } from '@/types/sales';
 import type { PurchaseReceiptPayload } from '@/types/inventory';
 import type { PosMobileSettings } from '@/types/settings';
 import type { ReceiptPrintCustomization } from '@/types/receiptPrint';
-import { resolveCurrencyCode } from '@/utils/format';
+import { resolveCurrencyCode, formatPrintAmount } from '@/utils/format';
+import { formatReceiptQtyDetail, resolveLineUom } from '@/utils/uom';
 import { mergeReceiptPrintSettings } from '@/utils/receiptPrintCustomization';
 import {
   createReceiptLayout,
@@ -41,7 +48,7 @@ export const buildEscPosReceipt = (
   const header = receipt.header as Record<string, string | undefined>;
   const lines: string[] = [];
 
-  const company = header.company_name ?? 'Tax Invoice';
+  const company = header.company_name ?? DEFAULT_RECEIPT_STORE_NAME;
   lines.push(escTitleLine(ctx, company));
 
   if (header.address_line ?? header.address) {
@@ -62,8 +69,21 @@ export const buildEscPosReceipt = (
 
   lines.push(escLine(ctx, ''));
   const isReturn = Boolean((sale as { is_return?: boolean }).is_return);
-  lines.push(escHeaderLine(ctx, isReturn ? 'SALES RETURN' : 'TAX INVOICE'));
-  lines.push(escHeaderLine(ctx, `${isReturn ? 'Return' : 'Bill'}: ${sale.sales_id}`));
+  const isHold =
+    (sale as { is_hold?: boolean }).is_hold ||
+    (sale as { order_status?: string }).order_status === 'hold';
+  if (isHold) {
+    lines.push(escHeaderLine(ctx, 'HOLD ORDER'));
+    lines.push(escHeaderLine(ctx, 'NOT PAID — Complete to finalize'));
+  } else {
+    lines.push(
+      escHeaderLine(
+        ctx,
+        getSaleReceiptTitle({ isReturn, isHold: false }),
+      ),
+    );
+  }
+  lines.push(escHeaderLine(ctx, `${isReturn ? 'Return' : isHold ? 'Hold' : 'Bill'}: ${sale.sales_id}`));
   lines.push(escDivider(ctx));
   lines.push(escPadLine(ctx, 'Date', sale.sale_date));
 
@@ -86,29 +106,53 @@ export const buildEscPosReceipt = (
 
   for (const line of sale.lines) {
     const desc = wrapDesc(ctx, line.description);
+    const uom = resolveLineUom(line.uom);
     if (line.item_number) {
       lines.push(escLine(ctx, `ID ${line.item_number}`));
     }
     lines.push(escLine(ctx, desc));
-    const detail = `${line.qty} x ${line.unit_price.toFixed(2)}`;
-    lines.push(escPadLine(ctx, detail, line.line_total.toFixed(2)));
+    const detail = formatReceiptQtyDetail(
+      line.qty,
+      formatPrintAmount(line.unit_price, code),
+      uom,
+    );
+    lines.push(escPadLine(ctx, detail, formatPrintAmount(line.line_total, code)));
   }
 
   lines.push(escDivider(ctx));
-  lines.push(escPadLine(ctx, 'Subtotal', sale.sub_total.toFixed(2)));
+  lines.push(escPadLine(ctx, 'Subtotal', formatPrintAmount(sale.sub_total, code)));
   if (sale.discount > 0) {
-    lines.push(escPadLine(ctx, 'Discount', `-${sale.discount.toFixed(2)}`));
+    const baseLabel =
+      (sale as { discount_label?: string | null }).discount_label?.trim() || 'Discount';
+    const pct = (sale as { discount_percent?: number | null }).discount_percent;
+    const discountLabel =
+      pct != null && pct > 0 ? `${baseLabel} (${pct}%)` : baseLabel;
+    lines.push(
+      escPadLine(ctx, discountLabel, `-${formatPrintAmount(sale.discount, code)}`),
+    );
+    lines.push(
+      escPadLine(ctx, isHold ? 'Amount due' : 'Balance', formatPrintAmount(sale.net_amount, code)),
+    );
+  } else {
+    lines.push(escPadLine(ctx, isHold ? 'Amount due' : 'TOTAL', formatPrintAmount(sale.net_amount, code)));
   }
-  lines.push(escPadLine(ctx, 'TOTAL', `${code} ${sale.net_amount.toFixed(2)}`));
-  if (sale.amount_received != null) {
-    lines.push(escPadLine(ctx, 'Received', sale.amount_received.toFixed(2)));
+  if (!isHold && sale.amount_received != null) {
+    lines.push(
+      escPadLine(ctx, 'Received', formatPrintAmount(sale.amount_received, code)),
+    );
     const change = sale.amount_received - sale.net_amount;
     if (change >= 0) {
-      lines.push(escPadLine(ctx, 'Change', change.toFixed(2)));
+      lines.push(escPadLine(ctx, 'Change', formatPrintAmount(change, code)));
     }
+  }
+  if (isHold) {
+    lines.push(escLine(ctx, ''));
+    lines.push(escHeaderLine(ctx, 'THIS BILL IS ON HOLD'));
+    lines.push(escHeaderLine(ctx, 'Payment not taken yet'));
   }
   lines.push(escDivider(ctx));
   lines.push(escHeaderLine(ctx, customization.footerMessage));
+  lines.push(escHeaderLine(ctx, RECEIPT_SOFTWARE_PROVIDER));
   lines.push(escLine(ctx, ''));
   lines.push(escLine(ctx, ''));
 
@@ -137,8 +181,8 @@ export const buildEscPosPurchaseReceipt = (
     lines.push(escHeaderLine(ctx, `Tel: ${header.phone}`));
   }
   lines.push(escLine(ctx, ''));
-  lines.push(escHeaderLine(ctx, 'PURCHASE BILL'));
-  lines.push(escHeaderLine(ctx, `Invoice: ${purchase.invoice_id}`));
+  lines.push(escHeaderLine(ctx, PURCHASE_RECEIPT_TITLE));
+  lines.push(escHeaderLine(ctx, `Receipt: ${purchase.invoice_id}`));
   lines.push(escDivider(ctx));
   lines.push(escPadLine(ctx, 'Date', purchase.purchase_date));
 
@@ -161,22 +205,29 @@ export const buildEscPosPurchaseReceipt = (
 
   for (const line of purchase.lines) {
     const desc = wrapDesc(ctx, line.description);
+    const uom = resolveLineUom(line.uom);
     if (line.item_number) {
       lines.push(escLine(ctx, `ID ${line.item_number}`));
     }
     lines.push(escLine(ctx, desc));
-    const detail = `${line.qty} x ${line.unit_price.toFixed(2)}`;
-    lines.push(escPadLine(ctx, detail, line.line_total.toFixed(2)));
+    const detail = formatReceiptQtyDetail(
+      line.qty,
+      formatPrintAmount(line.unit_price, code),
+      uom,
+    );
+    lines.push(escPadLine(ctx, detail, formatPrintAmount(line.line_total, code)));
   }
 
   lines.push(escDivider(ctx));
-  lines.push(escPadLine(ctx, 'Subtotal', purchase.sub_total.toFixed(2)));
+  lines.push(escPadLine(ctx, 'Subtotal', formatPrintAmount(purchase.sub_total, code)));
   if (purchase.discount > 0) {
-    lines.push(escPadLine(ctx, 'Discount', `-${purchase.discount.toFixed(2)}`));
+    lines.push(
+      escPadLine(ctx, 'Discount', `-${formatPrintAmount(purchase.discount, code)}`),
+    );
   }
-  lines.push(escPadLine(ctx, 'TOTAL', `${code} ${purchase.amount.toFixed(2)}`));
+  lines.push(escPadLine(ctx, 'TOTAL', formatPrintAmount(purchase.amount, code)));
   if (purchase.amount_paid != null) {
-    lines.push(escPadLine(ctx, 'Paid', purchase.amount_paid.toFixed(2)));
+    lines.push(escPadLine(ctx, 'Paid', formatPrintAmount(purchase.amount_paid, code)));
   }
   if (purchase.notes?.trim()) {
     lines.push(escLine(ctx, ''));
@@ -184,6 +235,7 @@ export const buildEscPosPurchaseReceipt = (
   }
   lines.push(escDivider(ctx));
   lines.push(escHeaderLine(ctx, customization.footerMessage));
+  lines.push(escHeaderLine(ctx, RECEIPT_SOFTWARE_PROVIDER));
   lines.push(escLine(ctx, ''));
   lines.push(escLine(ctx, ''));
 

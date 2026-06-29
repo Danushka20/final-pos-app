@@ -11,9 +11,9 @@ export const isCashPayment = (method: string): boolean => /^cash$/i.test(method)
 
 export const isCreditPayment = (method: string): boolean => /^credit$/i.test(method);
 
-/** Amount received field is auto-filled and read-only */
+/** Amount received field is auto-filled and read-only (cash allows change entry) */
 export const locksAmountReceived = (method: string): boolean =>
-  isCashPayment(method) || isCreditPayment(method) || isOnlinePayment(method);
+  !isCashPayment(method);
 
 export const needsPaymentReference = (method: string): boolean =>
   isOnlinePayment(method) || /bank transfer/i.test(method);

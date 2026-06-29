@@ -5,6 +5,7 @@ import { Box, HStack, Pressable, Text, VStack } from '@gluestack-ui/themed';
 import { Minus, Plus, ShoppingCart, Trash2 } from 'lucide-react-native';
 import { PrimaryButton } from '@/components/buttons/PrimaryButton';
 import { formatCurrency } from '@/utils/format';
+import { formatPricePerUom, resolveLineUom } from '@/utils/uom';
 import { colors, shadows } from '@/theme';
 import type { CartLine, InventoryItem } from '@/types/sales';
 
@@ -78,6 +79,7 @@ export const PosCartPanel: React.FC<PosCartPanelProps> = ({
           {cart.map(line => {
             const item = itemStock.get(line.item_id);
             const stock = item?.qty ?? 0;
+            const uom = resolveLineUom(line.uom, item?.uom);
             const outOfStock = !allowNegativeInventory && stock <= 0;
             const overStock = !allowNegativeInventory && line.qty > stock;
 
@@ -97,9 +99,9 @@ export const PosCartPanel: React.FC<PosCartPanelProps> = ({
                   </Text>
                   <Text size="2xs" color={colors.textMuted}>
                     {line.item_number ? `ID ${line.item_number} · ` : ''}
-                    {formatCurrency(line.unit_price, currency)} each
+                    {formatPricePerUom(formatCurrency(line.unit_price, currency), uom)}
                     {!allowNegativeInventory && item
-                      ? ` · Stock ${stock}`
+                      ? ` · Stock ${stock} ${uom}`
                       : ''}
                   </Text>
                   {outOfStock ? (
@@ -121,6 +123,9 @@ export const PosCartPanel: React.FC<PosCartPanelProps> = ({
                   </TouchableOpacity>
                   <Text fontSize="$sm" fontWeight="$bold" minWidth={20} textAlign="center">
                     {line.qty}
+                  </Text>
+                  <Text fontSize="$2xs" color={colors.textMuted} fontWeight="$bold">
+                    {uom}
                   </Text>
                   <TouchableOpacity
                     onPress={() => onUpdateQty(line.item_id, line.qty + 1)}

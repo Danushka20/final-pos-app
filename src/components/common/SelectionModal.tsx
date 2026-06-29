@@ -18,6 +18,8 @@ interface SelectionModalProps {
   onSelect: (option: SelectionOption) => void;
   onClose: () => void;
   emptyMessage?: string;
+  footerActionLabel?: string;
+  onFooterAction?: () => void;
 }
 
 export const SelectionModal: React.FC<SelectionModalProps> = ({
@@ -27,6 +29,8 @@ export const SelectionModal: React.FC<SelectionModalProps> = ({
   onSelect,
   onClose,
   emptyMessage = 'No options found',
+  footerActionLabel,
+  onFooterAction,
 }) => (
   <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
     <View style={styles.overlay}>
@@ -46,6 +50,13 @@ export const SelectionModal: React.FC<SelectionModalProps> = ({
             <X size={22} color={colors.textSecondary} />
           </TouchableOpacity>
         </Box>
+        {footerActionLabel && onFooterAction ? (
+          <TouchableOpacity style={styles.footerAction} onPress={onFooterAction}>
+            <Text fontWeight="$bold" color={colors.primary}>
+              {footerActionLabel}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
         <SmoothFlatList
           data={options}
           keyExtractor={item => item.id}
@@ -86,6 +97,13 @@ const styles = StyleSheet.create({
   },
   list: {
     paddingBottom: 32,
+  },
+  footerAction: {
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.primarySoft,
   },
   row: {
     paddingHorizontal: 20,

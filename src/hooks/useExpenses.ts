@@ -57,7 +57,7 @@ export const useExpenses = (initialLocation?: string) => {
 
   useAutoRefresh({
     onRefresh: silent => load(silent),
-    scopes: ['expenses', 'dashboard'],
+    scopes: ['expenses', 'dashboard', 'sales', 'reports'],
   });
 
   const filtered = useMemo(() => {

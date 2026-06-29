@@ -1,6 +1,17 @@
-import { PermissionsAndroid, Platform, Share } from 'react-native';
+import {
+  InteractionManager,
+  PermissionsAndroid,
+  Platform,
+  Share,
+} from 'react-native';
 import type { RefObject } from 'react';
 import { captureRef, type ViewShotRef } from 'react-native-view-shot';
+import {
+  getSaleReceiptTitle,
+  RECEIPT_SOFTWARE_PROVIDER,
+} from '@/constants/receiptBranding';
+import { formatPrintAmount, resolveCurrencyCode } from '@/utils/format';
+import { formatReceiptQtyDetail, resolveLineUom } from '@/utils/uom';
 import type { SaleReceiptPayload } from '@/types/sales';
 import type { PurchaseReceiptPayload } from '@/types/inventory';
 
@@ -13,7 +24,19 @@ async function requestSaveToGalleryPermission(): Promise<void> {
 
   const api = Platform.Version;
 
-  // Android 10+ saves via MediaStore — no runtime permission required for photos.
+  if (api >= 33) {
+    await PermissionsAndroid.request(
+      PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES,
+      {
+        title: 'Save receipt image',
+        message: 'Allow access to save receipt images to your gallery.',
+        buttonPositive: 'Allow',
+        buttonNegative: 'Cancel',
+      },
+    );
+    return;
+  }
+
   if (api >= 29) {
     return;
   }
@@ -35,40 +58,67 @@ async function requestSaveToGalleryPermission(): Promise<void> {
 }
 
 function normalizeFileUri(uri: string): string {
-  if (uri.startsWith('file://') || uri.startsWith('content://')) {
-    return uri;
+  const trimmed = uri.trim();
+  if (trimmed.startsWith('file://') || trimmed.startsWith('content://')) {
+    return trimmed;
   }
-  return `file://${uri}`;
+  return `file://${trimmed}`;
+}
+
+async function waitForReceiptLayout(): Promise<void> {
+  await new Promise<void>(resolve => {
+    InteractionManager.runAfterInteractions(() => resolve());
+  });
+  await new Promise<void>(resolve => {
+    requestAnimationFrame(() => resolve());
+  });
+  await new Promise<void>(resolve => setTimeout(resolve, 350));
 }
 
 async function captureFromViewShotRef(
   viewShotRef: ReceiptCaptureRef,
 ): Promise<string> {
-  await new Promise<void>(resolve => setTimeout(resolve, 500));
+  await waitForReceiptLayout();
 
   const node = viewShotRef.current;
   if (!node) {
     throw new Error('Receipt is not ready. Wait a moment and try again.');
   }
 
-  if (typeof node.capture === 'function') {
-    const uri = await node.capture();
-    if (uri) {
-      return uri;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      if (typeof node.capture === 'function') {
+        const captured = await node.capture();
+        if (captured) {
+          return normalizeFileUri(captured);
+        }
+      }
+
+      const uri = await captureRef(node, {
+        format: 'png',
+        quality: 1,
+        result: 'tmpfile',
+      });
+      if (uri) {
+        return normalizeFileUri(uri);
+      }
+    } catch (error) {
+      lastError = error;
+      await new Promise<void>(resolve => setTimeout(resolve, 400));
     }
   }
 
-  return captureRef(node, {
-    format: 'png',
-    quality: 1,
-    result: 'tmpfile',
-  });
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+  throw new Error('Could not capture receipt image. Scroll to the top and try again.');
 }
 
 async function captureBase64FromViewShotRef(
   viewShotRef: ReceiptCaptureRef,
 ): Promise<string> {
-  await new Promise<void>(resolve => setTimeout(resolve, 500));
+  await waitForReceiptLayout();
 
   const node = viewShotRef.current;
   if (!node) {
@@ -88,10 +138,16 @@ async function getCameraRoll() {
     return mod.CameraRoll;
   } catch {
     throw new Error(
-      'Gallery save is not installed. Rebuild the app:\n' +
-        'cd POSMobile && npm install && npm run android',
+      'Gallery save is not available. Rebuild the app after installing camera-roll.',
     );
   }
+}
+
+function formatSaveError(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return 'Could not save receipt image to gallery.';
 }
 
 async function saveUriToGallery(uri: string, salesId: string): Promise<string> {
@@ -99,14 +155,17 @@ async function saveUriToGallery(uri: string, salesId: string): Promise<string> {
 
   const CameraRoll = await getCameraRoll();
   const fileUri = normalizeFileUri(uri);
-  const album = 'POS Receipts';
 
   try {
-    await CameraRoll.saveAsset(fileUri, { type: 'photo', album });
-    return `Receipt ${salesId} saved to Photos (${album})`;
-  } catch {
     await CameraRoll.saveAsset(fileUri, { type: 'photo' });
     return `Receipt ${salesId} saved to Photos`;
+  } catch (firstError) {
+    try {
+      await CameraRoll.save(fileUri, { type: 'photo' });
+      return `Receipt ${salesId} saved to Photos`;
+    } catch {
+      throw new Error(formatSaveError(firstError));
+    }
   }
 }
 
@@ -119,13 +178,29 @@ function getReceiptReference(receipt: ShareableReceipt): string {
   return receipt.sale.sales_id;
 }
 
-/** Save receipt PNG directly to device gallery (Downloads / Photos). */
+/** Save receipt PNG to device gallery (Photos). */
 export async function downloadReceiptAsImage(
   viewShotRef: ReceiptCaptureRef,
   receipt: ShareableReceipt,
 ): Promise<string> {
   const uri = await captureFromViewShotRef(viewShotRef);
-  return saveUriToGallery(uri, getReceiptReference(receipt));
+  const salesId = getReceiptReference(receipt);
+  const fileUri = normalizeFileUri(uri);
+
+  try {
+    return await saveUriToGallery(uri, salesId);
+  } catch (galleryError) {
+    try {
+      await Share.share({
+        title: `Receipt ${salesId}`,
+        message: Platform.OS === 'android' ? `Receipt ${salesId}` : undefined,
+        url: fileUri,
+      });
+      return `Receipt ${salesId} ready — pick Save or Photos in the share menu if gallery save failed.`;
+    } catch {
+      throw new Error(formatSaveError(galleryError));
+    }
+  }
 }
 
 /** Open share sheet with receipt image file. */
@@ -145,16 +220,16 @@ export async function shareReceiptImageFile(
   }
 
   try {
-    // Android: share a gallery/content URI for better app compatibility.
     await requestSaveToGalleryPermission();
     const CameraRoll = await getCameraRoll();
-    const shareableUri = await CameraRoll.saveAsset(fileUri, {
-      type: 'photo',
-      album: 'POS Receipts',
-    });
+    const saved = await CameraRoll.saveAsset(fileUri, { type: 'photo' });
+    const shareUri =
+      saved?.node?.image?.uri != null
+        ? normalizeFileUri(String(saved.node.image.uri))
+        : fileUri;
     await Share.share({
       title: `Receipt ${receiptRef}`,
-      url: normalizeFileUri(String(shareableUri)),
+      url: shareUri,
     });
   } catch {
     try {
@@ -170,21 +245,31 @@ export async function shareReceiptImageFile(
   }
 }
 
-export function buildReceiptShareText(receipt: SaleReceiptPayload): string {
+export function buildReceiptShareText(
+  receipt: SaleReceiptPayload,
+  currency?: string | null,
+): string {
   const s = receipt.sale;
   const header = receipt.header as Record<string, string | undefined>;
   const company = header.company_name ?? 'Receipt';
+  const code = resolveCurrencyCode(currency);
+  const isHold = Boolean(s.is_hold || s.order_status === 'hold');
+  const discountLine =
+    s.discount > 0
+      ? `Discount${s.discount_percent != null && s.discount_percent > 0 ? ` (${s.discount_percent}%)` : ''}: -${formatPrintAmount(s.discount, code)}`
+      : '';
   const lines = s.lines
-    .map(
-      l =>
-        `  ${l.item_number ? `[${l.item_number}] ` : ''}${l.description} x${l.qty} = ${l.line_total.toFixed(2)}`,
-    )
+    .map(l => {
+      const uom = resolveLineUom(l.uom);
+      return `  ${l.item_number ? `[${l.item_number}] ` : ''}${l.description} ${formatReceiptQtyDetail(l.qty, formatPrintAmount(l.unit_price, code), uom)} = ${formatPrintAmount(l.line_total, code)}`;
+    })
     .join('\n');
 
   return [
     company,
-    s.is_return ? 'SALES RETURN' : 'TAX INVOICE',
-    `Bill: ${s.sales_id}`,
+    getSaleReceiptTitle({ isHold, isReturn: Boolean(s.is_return) }),
+    isHold ? 'NOT PAID — Complete to finalize' : '',
+    `${isHold ? 'Hold' : s.is_return ? 'Return' : 'Bill'}: ${s.sales_id}`,
     `Date: ${s.sale_date}`,
     s.location ? `Branch: ${s.location}` : '',
     s.customer_name ? `Customer: ${s.customer_name}` : '',
@@ -192,12 +277,16 @@ export function buildReceiptShareText(receipt: SaleReceiptPayload): string {
     '---',
     lines,
     '---',
-    `Subtotal: ${s.sub_total.toFixed(2)}`,
-    s.discount > 0 ? `Discount: -${s.discount.toFixed(2)}` : '',
-    `TOTAL: ${s.net_amount.toFixed(2)}`,
-    s.amount_received != null ? `Paid: ${s.amount_received.toFixed(2)}` : '',
+    `Subtotal: ${formatPrintAmount(s.sub_total, code)}`,
+    discountLine,
+    `${isHold ? 'Amount due' : s.discount > 0 ? 'Balance' : 'TOTAL'}: ${formatPrintAmount(s.net_amount, code)}`,
+    !isHold && s.amount_received != null
+      ? `Paid: ${formatPrintAmount(s.amount_received, code)}`
+      : '',
+    isHold ? 'THIS BILL IS ON HOLD' : '',
     '',
     'Thank you!',
+    RECEIPT_SOFTWARE_PROVIDER,
   ]
     .filter(Boolean)
     .join('\n');

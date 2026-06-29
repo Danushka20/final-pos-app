@@ -4,7 +4,7 @@ import { NavigationContext } from '@react-navigation/native';
 import type { DataRefreshScope } from '@/context/DataRefreshContext';
 import { useDataRefreshRevision } from '@/context/DataRefreshContext';
 
-const DEFAULT_INTERVAL_MS = 25_000;
+const DEFAULT_INTERVAL_MS = 0;
 
 interface UseAutoRefreshOptions {
   /** Silent background refresh (no full-screen loader) */

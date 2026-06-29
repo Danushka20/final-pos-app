@@ -41,7 +41,7 @@ export const usePurchases = () => {
 
   useAutoRefresh({
     onRefresh: silent => load(silent),
-    scopes: ['purchases', 'dashboard'],
+    scopes: ['purchases', 'dashboard', 'inventory', 'reports'],
   });
 
   return {

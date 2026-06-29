@@ -21,3 +21,6 @@ export const usePosSaleContext = (): PosSaleContextValue => {
   }
   return ctx;
 };
+
+export const useOptionalPosSaleContext = (): PosSaleContextValue | null =>
+  useContext(PosSaleContext);

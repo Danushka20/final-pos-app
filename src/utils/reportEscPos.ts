@@ -1,7 +1,7 @@
 import type { PosMobileSettings } from '@/types/settings';
 import type { ReceiptPrintCustomization } from '@/types/receiptPrint';
 import type { SystemReportPayload } from '@/types/reports';
-import { resolveCurrencyCode } from '@/utils/format';
+import { resolveCurrencyCode, formatPrintAmount } from '@/utils/format';
 import { mergeReceiptPrintSettings } from '@/utils/receiptPrintCustomization';
 import {
   createReceiptLayout,
@@ -76,28 +76,41 @@ const buildDailySummary = (
 
   const { metrics, summary } = data;
   lines.push(escHeaderLine(ctx, 'TODAY'));
-  lines.push(escPadLine(ctx, 'Sales', `${summary.today_sales_count} · ${code} ${summary.today_sales_amount.toFixed(2)}`));
+  lines.push(
+    escPadLine(
+      ctx,
+      'Sales',
+      `${summary.today_sales_count} · ${formatPrintAmount(summary.today_sales_amount, code)}`,
+    ),
+  );
   if ((summary.today_returns_count ?? 0) > 0) {
     lines.push(
       escPadLine(
         ctx,
         'Returns',
-        `${summary.today_returns_count} · ${code} ${(summary.today_returns_amount ?? 0).toFixed(2)}`,
+        `${summary.today_returns_count} · ${formatPrintAmount(summary.today_returns_amount ?? 0, code)}`,
       ),
     );
   }
   if (summary.today_net_sales_amount != null) {
-    lines.push(escPadLine(ctx, 'Net sales', `${code} ${summary.today_net_sales_amount.toFixed(2)}`));
+    lines.push(
+      escPadLine(ctx, 'Net sales', formatPrintAmount(summary.today_net_sales_amount, code)),
+    );
   }
   lines.push(
     escPadLine(
       ctx,
       'Purchases',
-      `${summary.today_purchases_count} · ${code} ${summary.today_purchases_amount.toFixed(2)}`,
+      `${summary.today_purchases_count} · ${formatPrintAmount(summary.today_purchases_amount, code)}`,
     ),
   );
-  lines.push(escPadLine(ctx, 'Expenses', `${code} ${(metrics.today_expenses_amount ?? 0).toFixed(2)}`));
-  lines.push(escPadLine(ctx, 'Payments', `${code} ${(metrics.today_payments_amount ?? 0).toFixed(2)}`));
+  lines.push(...buildPurchaseRowLines(report, ctx, code));
+  lines.push(
+    escPadLine(ctx, 'Expenses', formatPrintAmount(metrics.today_expenses_amount ?? 0, code)),
+  );
+  lines.push(
+    escPadLine(ctx, 'Payments', formatPrintAmount(metrics.today_payments_amount ?? 0, code)),
+  );
   lines.push(escDivider(ctx));
   lines.push(escHeaderLine(ctx, 'INVENTORY'));
   lines.push(escPadLine(ctx, 'Active items', String(metrics.active_items ?? 0)));
@@ -107,7 +120,35 @@ const buildDailySummary = (
   lines.push(escHeaderLine(ctx, 'OTHER'));
   lines.push(escPadLine(ctx, 'Hold orders', String(metrics.hold_orders_count ?? 0)));
   lines.push(escPadLine(ctx, 'Customers', String(metrics.customers_count ?? 0)));
-  lines.push(escPadLine(ctx, 'Month sales', `${code} ${(metrics.month_sales_amount ?? 0).toFixed(2)}`));
+  lines.push(
+    escPadLine(ctx, 'Month sales', formatPrintAmount(metrics.month_sales_amount ?? 0, code)),
+  );
+  return lines;
+};
+
+const buildPurchaseRowLines = (
+  report: SystemReportPayload,
+  ctx: ReceiptLayoutContext,
+  code: string,
+): string[] => {
+  const lines: string[] = [];
+  const rows = report.purchase_rows ?? [];
+
+  for (const row of rows) {
+    lines.push(escLine(ctx, wrapText(ctx, row.invoice_id)));
+    const detail = [
+      row.supplier_name ? wrapText(ctx, row.supplier_name) : null,
+      row.payment_method ?? null,
+      row.time ?? null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    if (detail) {
+      lines.push(escLine(ctx, wrapText(ctx, detail)));
+    }
+    lines.push(escPadLine(ctx, 'Bill', formatPrintAmount(row.amount, code)));
+  }
+
   return lines;
 };
 
@@ -134,9 +175,21 @@ const buildSalesReport = (
   );
 
   lines.push(escPadLine(ctx, 'Total bills', String(rows.length)));
-  lines.push(escPadLine(ctx, 'Sales', `${summary.sales} · ${code} ${summary.salesAmount.toFixed(2)}`));
+  lines.push(
+    escPadLine(
+      ctx,
+      'Sales',
+      `${summary.sales} · ${formatPrintAmount(summary.salesAmount, code)}`,
+    ),
+  );
   if (summary.returns > 0) {
-    lines.push(escPadLine(ctx, 'Returns', `${summary.returns} · ${code} ${summary.returnAmount.toFixed(2)}`));
+    lines.push(
+      escPadLine(
+        ctx,
+        'Returns',
+        `${summary.returns} · ${formatPrintAmount(summary.returnAmount, code)}`,
+      ),
+    );
   }
   lines.push(escDivider(ctx));
   lines.push(escPadLine(ctx, 'Bill', 'Amount'));
@@ -156,47 +209,17 @@ const buildSalesReport = (
     if (detail) {
       lines.push(escLine(ctx, wrapText(ctx, detail)));
     }
-    lines.push(escPadLine(ctx, isReturn ? 'Return' : 'Sale', row.amount.toFixed(2)));
+    lines.push(
+      escPadLine(
+        ctx,
+        isReturn ? 'Return' : 'Sale',
+        formatPrintAmount(row.amount, code),
+      ),
+    );
   }
 
   if (!rows.length) {
     lines.push(escHeaderLine(ctx, 'No sales today'));
-  }
-  return lines;
-};
-
-const buildPurchasesReport = (
-  report: SystemReportPayload,
-  ctx: ReceiptLayoutContext,
-  code: string,
-): string[] => {
-  const lines: string[] = [];
-  const rows = report.purchase_rows ?? [];
-  const total = rows.reduce((sum, row) => sum + row.amount, 0);
-
-  lines.push(escPadLine(ctx, 'Total bills', String(rows.length)));
-  lines.push(escPadLine(ctx, 'Amount', `${code} ${total.toFixed(2)}`));
-  lines.push(escDivider(ctx));
-  lines.push(escPadLine(ctx, 'Invoice', 'Amount'));
-  lines.push(escLine(ctx, '.'.repeat(ctx.lineWidth), 'left'));
-
-  for (const row of rows) {
-    lines.push(escLine(ctx, wrapText(ctx, row.invoice_id)));
-    const detail = [
-      row.supplier_name ? wrapText(ctx, row.supplier_name) : null,
-      row.payment_method ?? null,
-      row.time ?? null,
-    ]
-      .filter(Boolean)
-      .join(' · ');
-    if (detail) {
-      lines.push(escLine(ctx, wrapText(ctx, detail)));
-    }
-    lines.push(escPadLine(ctx, 'Bill', row.amount.toFixed(2)));
-  }
-
-  if (!rows.length) {
-    lines.push(escHeaderLine(ctx, 'No purchases today'));
   }
   return lines;
 };
@@ -247,11 +270,8 @@ export const buildEscPosReport = (
     case 'daily_summary':
       lines.push(...buildDailySummary(report, ctx, code));
       break;
-    case 'today_sales':
+    case 'sales_report':
       lines.push(...buildSalesReport(report, ctx, code));
-      break;
-    case 'today_purchases':
-      lines.push(...buildPurchasesReport(report, ctx, code));
       break;
     case 'reorder':
       lines.push(...buildReorderReport(report, ctx));

@@ -1,7 +1,13 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronRight, Package, ShoppingCart, type LucideIcon } from 'lucide-react-native';
+import {
+  ChevronRight,
+  CreditCard,
+  Package,
+  ShoppingCart,
+  type LucideIcon,
+} from 'lucide-react-native';
 import { formatCurrency } from '@/utils/format';
 import {
   colors,
@@ -17,18 +23,20 @@ interface FloatingCartFabProps {
   total: number;
   currency?: string;
   isReturn?: boolean;
-  /** sale = View order, purchase = View purchase */
-  variant?: 'sale' | 'purchase' | 'return';
+  variant?: 'sale' | 'purchase' | 'return' | 'checkout';
   onPress: () => void;
+  loading?: boolean;
+  disabled?: boolean;
 }
 
 const VARIANT_CONFIG: Record<
-  'sale' | 'purchase' | 'return',
+  'sale' | 'purchase' | 'return' | 'checkout',
   { label: string; Icon: LucideIcon; a11y: string }
 > = {
   sale: { label: 'View order', Icon: ShoppingCart, a11y: 'View order' },
   purchase: { label: 'View purchase', Icon: Package, a11y: 'View purchase' },
   return: { label: 'Return order', Icon: ShoppingCart, a11y: 'View return order' },
+  checkout: { label: 'Save & Pay', Icon: CreditCard, a11y: 'Save and pay' },
 };
 
 export const FloatingCartFab: React.FC<FloatingCartFabProps> = ({
@@ -38,12 +46,17 @@ export const FloatingCartFab: React.FC<FloatingCartFabProps> = ({
   isReturn,
   variant,
   onPress,
+  loading = false,
+  disabled = false,
 }) => {
   const insets = useSafeAreaInsets();
   const resolvedVariant = variant ?? (isReturn ? 'return' : 'sale');
-  const { label, Icon, a11y } = VARIANT_CONFIG[resolvedVariant];
+  const config = VARIANT_CONFIG[resolvedVariant];
+  const label =
+    resolvedVariant === 'checkout' && isReturn ? 'Save Return' : config.label;
+  const { Icon, a11y } = config;
 
-  if (itemCount <= 0) {
+  if (itemCount <= 0 && resolvedVariant !== 'checkout') {
     return null;
   }
 
@@ -54,14 +67,21 @@ export const FloatingCartFab: React.FC<FloatingCartFabProps> = ({
     <View pointerEvents="box-none" style={[styles.wrap, { bottom: bottomOffset }]}>
       <Pressable
         onPress={onPress}
-        style={({ pressed }) => [styles.chip, pressed && styles.chipPressed]}
+        disabled={disabled || loading}
+        style={({ pressed }) => [
+          styles.chip,
+          pressed && !disabled && !loading && styles.chipPressed,
+          (disabled || loading) && styles.chipDisabled,
+        ]}
         accessibilityRole="button"
-        accessibilityLabel={a11y}>
+        accessibilityLabel={resolvedVariant === 'checkout' && isReturn ? 'Save return' : a11y}>
         <View style={styles.iconWrap}>
           <Icon size={22} color={colors.text} strokeWidth={2.25} />
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{itemCount > 99 ? '99+' : itemCount}</Text>
-          </View>
+          {itemCount > 0 ? (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{itemCount > 99 ? '99+' : itemCount}</Text>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.textCol}>
@@ -69,8 +89,16 @@ export const FloatingCartFab: React.FC<FloatingCartFabProps> = ({
           <Text style={styles.total}>{formatCurrency(total, currency)}</Text>
         </View>
 
-        <View style={styles.arrowWrap}>
-          <ChevronRight size={20} color={colors.white} strokeWidth={2.5} />
+        <View
+          style={[
+            styles.arrowWrap,
+            isReturn && resolvedVariant === 'checkout' && styles.arrowReturn,
+          ]}>
+          {loading ? (
+            <ActivityIndicator size="small" color={colors.white} />
+          ) : (
+            <ChevronRight size={20} color={colors.white} strokeWidth={2.5} />
+          )}
         </View>
       </Pressable>
     </View>
@@ -103,6 +131,9 @@ const styles = StyleSheet.create({
     opacity: 0.94,
     transform: [{ scale: 0.99 }],
     backgroundColor: colors.primarySoft,
+  },
+  chipDisabled: {
+    opacity: 0.65,
   },
   iconWrap: {
     width: 44,
@@ -160,5 +191,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.text,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  arrowReturn: {
+    backgroundColor: colors.error,
   },
 });

@@ -18,7 +18,7 @@ export function navigateToReports(): void {
     return;
   }
   navigationRef.navigate('MainTabs', {
-    screen: 'Home',
+    screen: 'Reports',
     params: { screen: 'ReportsList' },
   });
 }

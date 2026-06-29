@@ -18,8 +18,9 @@ interface AppAlertContextValue {
   alerts: AppAlert[];
   unreadCount: number;
   loading: boolean;
-  refresh: () => Promise<void>;
+  refresh: () => Promise<AppAlert[]>;
   markAllRead: () => void;
+  syncPhoneNotifications: () => Promise<void>;
 }
 
 const AppAlertContext = createContext<AppAlertContextValue | undefined>(undefined);
@@ -33,10 +34,10 @@ export const AppAlertProvider: React.FC<{ children: React.ReactNode }> = ({
   const [hasSeenAlerts, setHasSeenAlerts] = useState(false);
   const prevAlertCountRef = useRef(0);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<AppAlert[]> => {
     if (!isAuthenticated) {
       setAlerts([]);
-      return;
+      return [];
     }
     setLoading(true);
     try {
@@ -44,13 +45,24 @@ export const AppAlertProvider: React.FC<{ children: React.ReactNode }> = ({
         dashboardService.getOverview(),
         dashboardService.getTodayTables(),
       ]);
-      setAlerts(buildAppAlerts(overview, today));
+      const nextAlerts = buildAppAlerts(overview, today);
+      setAlerts(nextAlerts);
+      return nextAlerts;
     } catch {
       /* keep previous alerts on silent refresh failure */
+      return [];
     } finally {
       setLoading(false);
     }
   }, [isAuthenticated]);
+
+  const syncPhoneNotifications = useCallback(async () => {
+    if (!isAuthenticated) {
+      return;
+    }
+    const latest = await refresh();
+    await phoneNotificationService.syncAlerts(latest);
+  }, [isAuthenticated, refresh]);
 
   useEffect(() => {
     if (!isAuthenticated || alerts.length === 0) {
@@ -64,8 +76,10 @@ export const AppAlertProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [refresh]);
 
   useAutoRefresh({
-    onRefresh: () => refresh(),
-    scopes: ['dashboard', 'todayActivity', 'inventory', 'purchases', 'sales'],
+    onRefresh: () => {
+      void refresh();
+    },
+    scopes: ['dashboard', 'todayActivity', 'inventory', 'purchases', 'sales', 'reports', 'expenses'],
   });
 
   useEffect(() => {
@@ -88,8 +102,9 @@ export const AppAlertProvider: React.FC<{ children: React.ReactNode }> = ({
       loading,
       refresh,
       markAllRead,
+      syncPhoneNotifications,
     }),
-    [alerts, unreadCount, loading, refresh, markAllRead],
+    [alerts, unreadCount, loading, refresh, markAllRead, syncPhoneNotifications],
   );
 
   return (

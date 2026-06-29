@@ -5,16 +5,19 @@ import { Globe, Smartphone } from 'lucide-react-native';
 import type { BankAccount } from '@/services/api/bankService';
 import {
   acceptsCardLast4,
+  isCashPayment,
   isOnlinePayment,
   locksAmountReceived,
   needsBank,
 } from '@/utils/paymentMethod';
+import { formatCurrency, getCurrencyLabel } from '@/utils/format';
 import { colors, appInputStyle, typography } from '@/theme';
 
 interface PaymentMethodDetailsProps {
   paymentMethod: string;
   isReturn: boolean;
   netAmount: number;
+  currency?: string;
   amountReceived: string;
   onAmountReceivedChange: (v: string) => void;
   banks: BankAccount[];
@@ -32,6 +35,7 @@ export const PaymentMethodDetails: React.FC<PaymentMethodDetailsProps> = ({
   paymentMethod,
   isReturn,
   netAmount,
+  currency,
   amountReceived,
   onAmountReceivedChange,
   banks,
@@ -50,10 +54,21 @@ export const PaymentMethodDetails: React.FC<PaymentMethodDetailsProps> = ({
     }
   }, [paymentMethod, netAmount, onAmountReceivedChange]);
 
+  const receivedNum = parseFloat(amountReceived.replace(/,/g, '')) || 0;
+  const changeDue =
+    !isReturn && isCashPayment(paymentMethod) && receivedNum >= netAmount
+      ? Math.round((receivedNum - netAmount) * 100) / 100
+      : null;
+
   return (
     <View key={paymentMethod} style={styles.panel}>
       <Text style={styles.label}>
         {isReturn ? 'Refund amount' : 'Amount received'}
+        {currency ? ` (${getCurrencyLabel(currency)})` : ''}
+      </Text>
+      <Text style={styles.amountHint}>
+        {isReturn ? 'Refund total' : 'Order total'}:{' '}
+        {formatCurrency(netAmount, currency)}
       </Text>
       <TextInput
         value={amountReceived}
@@ -62,6 +77,11 @@ export const PaymentMethodDetails: React.FC<PaymentMethodDetailsProps> = ({
         style={appInputStyle}
         editable={!locksAmountReceived(paymentMethod)}
       />
+      {changeDue != null && changeDue >= 0 ? (
+        <Text style={styles.changeHint}>
+          Change to give: {formatCurrency(changeDue, currency)}
+        </Text>
+      ) : null}
 
       {!isReturn && isOnlinePayment(paymentMethod) ? (
         <>
@@ -166,6 +186,18 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 12,
     marginBottom: 6,
+  },
+  amountHint: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginBottom: 8,
+  },
+  changeHint: {
+    ...typography.caption,
+    color: colors.primary,
+    fontWeight: '700',
+    marginTop: 8,
+    marginBottom: 4,
   },
   onlineBanner: {
     flexDirection: 'row',

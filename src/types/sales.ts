@@ -1,3 +1,5 @@
+import type { ApplicableOffer } from '@/types/offers';
+
 /** Standard sale — deducts stock */
 export const TRANSACTION_TYPE_SALE = '1001';
 /** Sales return — restores stock, records Return payment */
@@ -20,7 +22,20 @@ export interface PosContext {
   print_context: Record<string, unknown>;
   next_sales_id: string;
   filters: PosFilters;
-  applicable_offers: unknown[];
+  applicable_offers: ApplicableOffer[];
+}
+
+export interface ItemBatch {
+  id: number;
+  batch_number: string;
+  location?: string | null;
+  qty: number;
+  purchase_price?: number;
+  selling_price?: number | null;
+  expiry_date?: string | null;
+  notes?: string | null;
+  created_at?: string | null;
+  item_id?: number;
 }
 
 export interface InventoryItem {
@@ -37,9 +52,23 @@ export interface InventoryItem {
   purchase_price?: number;
   wholesale_price?: number;
   qty?: number;
+  sellable_qty?: number;
+  expired_stock_qty?: number;
   uom?: string;
   sku?: string | null;
   image_url?: string | null;
+  expiry_date?: string | null;
+  nearest_expiry_date?: string | null;
+  expiry_status?: 'none' | 'ok' | 'expiring_soon' | 'expired' | string | null;
+  expiry_days_remaining?: number | null;
+  has_expired_stock?: boolean;
+  has_batches?: boolean;
+  batch_count?: number;
+  /** When set, this grid row maps to a specific line on the original sale bill */
+  return_line_key?: string;
+  sale_line_batch_id?: number | null;
+  sale_line_batch_number?: string | null;
+  sale_line_batch_expiry?: string | null;
 }
 
 export interface CustomerSummary {
@@ -51,6 +80,8 @@ export interface CustomerSummary {
   email?: string | null;
   location?: string | null;
   address?: string | null;
+  address_line1?: string | null;
+  nic?: string | null;
   tax_id?: string | null;
   net_balance?: number;
 }
@@ -62,6 +93,10 @@ export interface CartLine {
   qty: number;
   unit_price: number;
   line_total: number;
+  uom?: string | null;
+  item_batch_id?: number | null;
+  batch_number?: string | null;
+  batch_expiry_date?: string | null;
 }
 
 export interface SaleLineItem extends CartLine {
@@ -83,6 +118,7 @@ export interface SaleRecord {
   net_amount: number;
   payment_method?: string | null;
   amount_received?: number | null;
+  notes?: string | null;
   items: SaleLineItem[];
 }
 
@@ -100,6 +136,10 @@ export interface SaleReceiptPayload {
     sales_id: string;
     transaction_type?: string;
     is_return?: boolean;
+    order_status?: string;
+    is_hold?: boolean;
+    discount_type?: 'percent' | 'amount';
+    discount_percent?: number | null;
     sale_date: string;
     location?: string | null;
     payment_method?: string | null;
@@ -129,6 +169,7 @@ export interface SaleReceiptPayload {
 export interface CreateSalePayload {
   transaction_type?: string;
   refund_card_last4?: string | null;
+  hold_pin?: string | null;
   order_status?: string;
   sales_type?: string;
   pricing_mode?: 'retail' | 'wholesale';
@@ -147,6 +188,10 @@ export interface CreateSalePayload {
   cheque_number?: string | null;
   notes?: string | null;
   items: CartLine[];
+  offer_applied?: boolean;
+  offer_id?: number | null;
+  offer_promo_code?: string | null;
+  promo_code?: string | null;
 }
 
 export interface SalePaymentDetails {
@@ -156,5 +201,6 @@ export interface SalePaymentDetails {
   cheque_number?: string | null;
   notes?: string | null;
   refund_card_last4?: string | null;
+  hold_pin?: string | null;
   original_sale_id?: string | null;
 }

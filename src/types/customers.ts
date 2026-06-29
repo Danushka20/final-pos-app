@@ -12,3 +12,14 @@ export interface CustomerListResult {
     locations: string[];
   };
 }
+
+export interface CustomerPayload {
+  customer_code?: string;
+  first_name: string;
+  customer_name: string;
+  contact_no: string;
+  email?: string | null;
+  location?: string | null;
+  address_line1?: string | null;
+  nic?: string | null;
+}

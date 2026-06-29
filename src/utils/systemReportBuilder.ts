@@ -57,17 +57,11 @@ export const buildSystemReport = (
           summary: today.summary,
         },
       };
-    case 'today_sales':
+    case 'sales_report':
       return {
         ...base,
-        title: 'Today\'s Sales Report',
+        title: 'Sales Report',
         sales_rows: today.today_sales,
-      };
-    case 'today_purchases':
-      return {
-        ...base,
-        title: 'Today\'s Purchases Report',
-        purchase_rows: today.today_purchases,
       };
     case 'reorder':
       return {

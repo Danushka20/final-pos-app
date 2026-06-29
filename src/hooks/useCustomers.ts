@@ -41,7 +41,7 @@ export const useCustomers = () => {
 
   useAutoRefresh({
     onRefresh: silent => load(silent),
-    scopes: ['customers', 'sales'],
+    scopes: ['customers', 'sales', 'dashboard'],
   });
 
   const refresh = useCallback(async () => {

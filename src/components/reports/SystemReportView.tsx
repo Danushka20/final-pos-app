@@ -67,6 +67,7 @@ export const SystemReportView: React.FC<SystemReportViewProps> = ({
           label="Purchases"
           value={`${summary.today_purchases_count} · ${formatCurrency(summary.today_purchases_amount, currency)}`}
         />
+        {(report.purchase_rows ?? []).length > 0 ? renderPurchaseRows() : null}
         <MetaRow
           label="Expenses"
           value={formatCurrency(metrics.today_expenses_amount, currency)}
@@ -194,8 +195,7 @@ export const SystemReportView: React.FC<SystemReportViewProps> = ({
 
       <View style={styles.body}>
         {report.type === 'daily_summary' ? renderDailySummary() : null}
-        {report.type === 'today_sales' ? renderSalesRows() : null}
-        {report.type === 'today_purchases' ? renderPurchaseRows() : null}
+        {report.type === 'sales_report' ? renderSalesRows() : null}
         {report.type === 'reorder' ? renderReorderRows() : null}
       </View>
 

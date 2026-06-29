@@ -2,7 +2,9 @@ import React from 'react';
 import { Image, StyleSheet, View } from 'react-native';
 import { HStack, Text, VStack } from '@gluestack-ui/themed';
 import { useReceiptLogoUri } from '@/hooks/useReceiptLogoUri';
-import { formatCurrency, resolveCurrencyCode } from '@/utils/format';
+import { PURCHASE_RECEIPT_TITLE, RECEIPT_SOFTWARE_PROVIDER } from '@/constants/receiptBranding';
+import { formatCurrency, getCurrencyLabel, resolveCurrencyCode } from '@/utils/format';
+import { formatReceiptQtyDetail, resolveLineUom } from '@/utils/uom';
 import { colors } from '@/theme';
 import type { PurchaseReceiptPayload } from '@/types/inventory';
 import type { PosMobileSettings } from '@/types/settings';
@@ -52,8 +54,11 @@ export const PurchaseReceiptView: React.FC<PurchaseReceiptViewProps> = ({
       {phone ? <Text style={styles.mutedCenter}>Tel: {phone}</Text> : null}
 
       <View style={styles.divider} />
-      <Text style={styles.invoiceTitle}>PURCHASE BILL</Text>
-      <Text style={styles.mutedCenter}>Invoice: {purchase.invoice_id}</Text>
+      <Text style={styles.invoiceTitle}>{PURCHASE_RECEIPT_TITLE}</Text>
+      <Text style={styles.mutedCenter}>Receipt: {purchase.invoice_id}</Text>
+      <Text style={styles.mutedCenter}>
+        All amounts in {getCurrencyLabel(currency)}
+      </Text>
 
       <View style={styles.metaBlock}>
         <MetaRow label="Date" value={purchase.purchase_date} />
@@ -80,20 +85,28 @@ export const PurchaseReceiptView: React.FC<PurchaseReceiptViewProps> = ({
       </View>
       <View style={styles.dividerThin} />
 
-      {purchase.lines.map((line, idx) => (
+      {purchase.lines.map((line, idx) => {
+        const uom = resolveLineUom(line.uom);
+        return (
         <View key={`${line.item_number}-${idx}`} style={styles.lineRow}>
           <VStack style={styles.colItem} flex={1}>
             <Text style={styles.lineDesc}>{line.description}</Text>
             <Text style={styles.lineSub}>
               {line.item_number ? `ID ${line.item_number} · ` : ''}
-              {line.qty} × {formatCurrency(line.unit_price, currency)}
+              {formatReceiptQtyDetail(
+                line.qty,
+                formatCurrency(line.unit_price, currency),
+                uom,
+              )}
             </Text>
           </VStack>
+          <Text style={[styles.lineQty, styles.colQty]}>{`${line.qty} ${uom}`}</Text>
           <Text style={[styles.lineAmt, styles.colAmt]}>
             {formatCurrency(line.line_total, currency)}
           </Text>
         </View>
-      ))}
+        );
+      })}
 
       <View style={styles.divider} />
       <TotalRow label="Subtotal" value={formatCurrency(purchase.sub_total, currency)} />
@@ -116,6 +129,7 @@ export const PurchaseReceiptView: React.FC<PurchaseReceiptViewProps> = ({
 
       <View style={styles.divider} />
       <Text style={styles.thankYou}>Purchase recorded successfully</Text>
+      <Text style={styles.softwareLine}>{RECEIPT_SOFTWARE_PROVIDER}</Text>
       <Text style={styles.footerNote}>Printed: {printedAt}</Text>
     </View>
   );
@@ -222,7 +236,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   colItem: { flex: 1 },
-  colQty: { width: 36, textAlign: 'right' },
+  colQty: { width: 52, textAlign: 'right' },
   colAmt: { width: 72, textAlign: 'right' },
   lineRow: {
     flexDirection: 'row',
@@ -240,6 +254,12 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.textMuted,
     marginTop: 2,
+  },
+  lineQty: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    textAlign: 'right',
   },
   lineAmt: {
     fontSize: 12,
@@ -287,6 +307,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: colors.text,
     marginTop: 4,
+  },
+  softwareLine: {
+    textAlign: 'center',
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    marginTop: 8,
+    letterSpacing: 0.4,
   },
   footerNote: {
     fontSize: 9,

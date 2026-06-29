@@ -1,3 +1,4 @@
+import { RECEIPT_SOFTWARE_PROVIDER } from '@/constants/receiptBranding';
 import type { ReceiptPrintCustomization } from '@/types/receiptPrint';
 import { createReceiptLayout, escDivider, escHeaderLine, escPadLine, escTitleLine } from '@/utils/receiptEscPosLayout';
 import { mergeReceiptPrintSettings } from '@/utils/receiptPrintCustomization';
@@ -21,6 +22,7 @@ export const buildShortTestReceipt = (
     escDivider(ctx),
     escHeaderLine(ctx, 'OK'),
     escHeaderLine(ctx, merged.footerMessage),
+    escHeaderLine(ctx, RECEIPT_SOFTWARE_PROVIDER),
     '',
     '',
   ];
@@ -73,6 +75,7 @@ export const buildLongTestReceipt = (
   lines.push(escPadLine(ctx, 'TOTAL', subtotal.toFixed(2)));
   lines.push(escDivider(ctx));
   lines.push(escHeaderLine(ctx, merged.footerMessage));
+  lines.push(escHeaderLine(ctx, RECEIPT_SOFTWARE_PROVIDER));
   lines.push('');
   lines.push('');
   return lines.join('');

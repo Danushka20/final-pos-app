@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useAutoRefresh } from '@/hooks/useAutoRefresh';
 import { useDataRefreshNotify } from '@/context/DataRefreshContext';
 import { inventoryService } from '@/services/api/inventoryService';
 import { purchaseService } from '@/services/api/purchaseService';
@@ -21,9 +22,68 @@ export interface PurchaseCartLine {
   qty: number;
   unit_price: number;
   line_total: number;
+  uom?: string | null;
+  /** When set, server creates or merges an inventory batch with this expiry. */
+  expiry_date?: string | null;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+const parseDraftQty = (raw: string | undefined): number | null => {
+  if (raw == null) {
+    return null;
+  }
+  const trimmed = raw.trim().replace(/,/g, '');
+  if (!trimmed || trimmed === '.') {
+    return null;
+  }
+  const parsed = parseFloat(trimmed);
+  return Number.isNaN(parsed) ? null : parsed;
+};
+
+export type PurchaseCartDraftOptions = {
+  priceDrafts?: Record<number, string>;
+  qtyDrafts?: Record<number, string>;
+};
+
+export function resolvePurchaseCartLines(
+  cart: PurchaseCartLine[],
+  options?: PurchaseCartDraftOptions,
+): PurchaseCartLine[] {
+  if (!options) {
+    return cart;
+  }
+  return cart.map(line => {
+    let unit_price = line.unit_price;
+    let qty = line.qty;
+
+    const priceRaw = options.priceDrafts?.[line.item_id];
+    if (priceRaw != null) {
+      const parsed = parseFloat(priceRaw.replace(/,/g, ''));
+      if (Number.isFinite(parsed)) {
+        unit_price = Math.max(0, parsed);
+      }
+    }
+
+    const qtyRaw = options.qtyDrafts?.[line.item_id];
+    if (qtyRaw != null) {
+      const parsedQty = parseDraftQty(qtyRaw);
+      if (parsedQty !== null && parsedQty > 0) {
+        qty = parsedQty;
+      }
+    }
+
+    if (unit_price === line.unit_price && qty === line.qty) {
+      return line;
+    }
+    return {
+      ...line,
+      unit_price,
+      qty,
+      line_total: round2(qty * unit_price),
+    };
+  });
+}
 
 export const usePurchaseCreate = () => {
   const notifyRefresh = useDataRefreshNotify();
@@ -62,9 +122,11 @@ export const usePurchaseCreate = () => {
     return inv;
   }, []);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const refresh = useCallback(async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const [invResult, supsResult, nextIdResult] =
         await Promise.allSettled([
@@ -112,15 +174,24 @@ export const usePurchaseCreate = () => {
       setCategoryId(null);
       setSubCategoryId('all');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load purchase data');
+      if (!silent) {
+        setError(e instanceof Error ? e.message : 'Failed to load purchase data');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [loadProducts]);
 
   useEffect(() => {
-    refresh();
+    refresh(false);
   }, [refresh]);
+
+  useAutoRefresh({
+    onRefresh: silent => refresh(silent),
+    scopes: ['inventory', 'purchases'],
+  });
 
   const displayItems = useMemo(() => {
     let rows = items;
@@ -181,6 +252,7 @@ export const usePurchaseCreate = () => {
           qty: 1,
           unit_price: price,
           line_total: round2(price),
+          uom: item.uom?.trim() || 'Pcs',
         },
       ];
     });
@@ -216,6 +288,26 @@ export const usePurchaseCreate = () => {
     );
   }, []);
 
+  const updateCartUnitPrice = useCallback((itemId: number, unitPrice: number) => {
+    const price = Math.max(0, unitPrice);
+    setCart(prev =>
+      prev.map(l =>
+        l.item_id === itemId
+          ? { ...l, unit_price: price, line_total: round2(l.qty * price) }
+          : l,
+      ),
+    );
+  }, []);
+
+  const updateCartExpiry = useCallback((itemId: number, expiryDate: string | null) => {
+    const normalized = expiryDate?.trim() || null;
+    setCart(prev =>
+      prev.map(l =>
+        l.item_id === itemId ? { ...l, expiry_date: normalized } : l,
+      ),
+    );
+  }, []);
+
   const decrementCartQty = useCallback((itemId: number) => {
     setCart(prev => {
       const line = prev.find(l => l.item_id === itemId);
@@ -246,6 +338,7 @@ export const usePurchaseCreate = () => {
       payment: SalePaymentDetails,
       locationOverride?: string,
       settings?: PosMobileSettings | null,
+      options?: PurchaseCartDraftOptions,
     ): Promise<{ receipt: PurchaseReceiptPayload } | null> => {
       const stockLocation = locationOverride || location || 'Main Location';
       if (!supplier) {
@@ -261,6 +354,11 @@ export const usePurchaseCreate = () => {
         return null;
       }
 
+      const committedLines = resolvePurchaseCartLines(cart, options);
+      const committedSubTotal = round2(
+        committedLines.reduce((sum, line) => sum + line.line_total, 0),
+      );
+
       const purchaseDate = new Date().toISOString().slice(0, 10);
       const receipt = buildPurchaseReceiptPayload({
         invoiceId,
@@ -269,9 +367,9 @@ export const usePurchaseCreate = () => {
         supplierContactNo: supplier.contact_no ?? null,
         supplierEmail: supplier.email ?? null,
         purchaseDate,
-        lines: cart,
-        subTotal: netAmount,
-        amount: netAmount,
+        lines: committedLines,
+        subTotal: committedSubTotal,
+        amount: committedSubTotal,
         paymentMethod: payment.payment_method,
         amountPaid: payment.amount_received,
         notes: payment.notes,
@@ -287,15 +385,22 @@ export const usePurchaseCreate = () => {
           location: stockLocation,
           supplier_id: isWalkIn ? null : supplier.id,
           supplier_name: supplier.supplier_name,
-          sub_total: netAmount,
+          sub_total: committedSubTotal,
           discount: 0,
-          amount: netAmount,
+          amount: committedSubTotal,
           payment_method: payment.payment_method,
           bank_id: payment.bank_id,
           cheque_number: payment.cheque_number,
           notes: payment.notes,
           purchase_date: purchaseDate,
-          items: cart,
+          items: committedLines.map(line => ({
+            item_id: line.item_id,
+            description: line.description,
+            qty: line.qty,
+            unit_price: line.unit_price,
+            line_total: line.line_total,
+            expiry_date: line.expiry_date?.trim() || undefined,
+          })),
         });
         setCart([]);
         setSupplier(WALK_IN_SUPPLIER);
@@ -306,7 +411,14 @@ export const usePurchaseCreate = () => {
         } catch {
           /* invoice id refresh is optional */
         }
-        notifyRefresh(['dashboard', 'todayActivity', 'purchases', 'inventory']);
+        notifyRefresh([
+          'dashboard',
+          'todayActivity',
+          'purchases',
+          'inventory',
+          'reports',
+          'expenses',
+        ]);
         return { receipt };
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to save purchase');
@@ -348,6 +460,8 @@ export const usePurchaseCreate = () => {
     getCartQty,
     toggleCartItem,
     updateCartQty,
+    updateCartUnitPrice,
+    updateCartExpiry,
     decrementCartQty,
     removeFromCart,
     subTotal,

@@ -3,6 +3,7 @@ import { RefreshControl, useWindowDimensions } from 'react-native';
 import { Box, Text } from '@gluestack-ui/themed';
 import { SmoothFlatList } from '@/components/common/SmoothFlatList';
 import { PosProductBox } from '@/components/sales/PosProductBox';
+import { itemHasBatches } from '@/utils/batchUtils';
 import { colors } from '@/theme';
 import type { InventoryItem } from '@/types/sales';
 
@@ -12,12 +13,16 @@ interface PosProductGridProps {
   refreshing: boolean;
   onRefresh: () => void;
   onAddItem: (item: InventoryItem) => void;
+  onIncrementItem?: (item: InventoryItem) => void;
   onRemoveItem: (item: InventoryItem) => void;
   onRemoveAll?: (item: InventoryItem) => void;
-  getCartQty?: (itemId: number) => number;
+  getCartQty?: (item: InventoryItem) => number;
   getDisplayPrice?: (item: InventoryItem) => number;
   ignoreStock?: boolean;
   canSellItem?: (item: InventoryItem) => boolean;
+  offerProductItemIds?: Set<number>;
+  batchItemIds?: Set<number>;
+  onOpenBatches?: (item: InventoryItem) => void;
   bottomInset?: number;
   /** Changes when cart qty changes — forces FlatList cells to refresh */
   cartRevision?: string;
@@ -34,12 +39,16 @@ export const PosProductGrid: React.FC<PosProductGridProps> = ({
   refreshing,
   onRefresh,
   onAddItem,
+  onIncrementItem,
   onRemoveItem,
   onRemoveAll,
   getCartQty,
   getDisplayPrice,
   ignoreStock,
   canSellItem,
+  offerProductItemIds,
+  batchItemIds,
+  onOpenBatches,
   bottomInset = 16,
   cartRevision = '',
 }) => {
@@ -52,8 +61,8 @@ export const PosProductGrid: React.FC<PosProductGridProps> = ({
   return (
     <SmoothFlatList
       data={items}
-      extraData={cartRevision}
-      keyExtractor={item => String(item.id)}
+      extraData={`${cartRevision}|${batchItemIds?.size ?? 0}`}
+      keyExtractor={item => item.return_line_key ?? String(item.id)}
       numColumns={NUM_COLUMNS}
       contentContainerStyle={{
         paddingHorizontal: GRID_H_PAD,
@@ -77,11 +86,15 @@ export const PosProductGrid: React.FC<PosProductGridProps> = ({
           <PosProductBox
             item={item}
             currency={currency}
-            cartQty={getCartQty?.(item.id) ?? 0}
+            cartQty={getCartQty?.(item) ?? 0}
             displayPrice={getDisplayPrice?.(item)}
             ignoreStock={ignoreStock}
+            hasOffer={offerProductItemIds?.has(item.id) ?? false}
+            hasBatches={itemHasBatches(item) || (batchItemIds?.has(item.id) ?? false)}
+            onOpenBatches={onOpenBatches}
             disabled={canSellItem ? !canSellItem(item) : false}
             onAdd={onAddItem}
+            onIncrement={onIncrementItem}
             onRemove={onRemoveItem}
             onRemoveAll={onRemoveAll}
           />

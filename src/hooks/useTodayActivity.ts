@@ -55,7 +55,7 @@ export const useTodayActivity = () => {
 
   useAutoRefresh({
     onRefresh: silent => load(silent),
-    scopes: ['dashboard', 'todayActivity'],
+    scopes: ['dashboard', 'todayActivity', 'sales', 'purchases', 'inventory', 'reports'],
   });
 
   return {
