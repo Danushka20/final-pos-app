@@ -1,8 +1,10 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Image,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
+  StatusBar,
   TextInput,
   StyleSheet,
 } from 'react-native';
@@ -24,17 +26,43 @@ import { usePosSettings } from '@/context/PosSettingsContext';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { useDataRefreshNotify } from '@/context/DataRefreshContext';
 import { inventoryService } from '@/services/api/inventoryService';
+import {
+  getStoredItemImage,
+  itemImageKey,
+  pickItemPhotoFromGallery,
+  removeItemImage,
+  saveItemImage,
+  toFileUri,
+} from '@/services/storage/itemImageStorage';
 import type { ProductsStackParamList } from '@/navigation/types';
 import type { ItemPayload, ItemCategory } from '@/types/inventory';
-import { Layers } from 'lucide-react-native';
+import {
+  deriveCategoriesFromItems,
+  mergeCategoryLists,
+} from '@/utils/inventoryCategoryUtils';
+import { Camera, Layers, Trash2 } from 'lucide-react-native';
 import { typography, colors, appInputStyle, appInputPlaceholderColor } from '@/theme';
 
 const UOM_PRESETS = ['Pcs', 'Kg', 'Ltr', 'Box', 'Pkt', 'Doz'];
 
+/** Real branch names only — "all" is a catalog filter, not a stock location. */
+const branchLocationOptions = (rows: string[]): string[] => {
+  const cleaned = rows
+    .map(l => l?.trim())
+    .filter((l): l is string => Boolean(l && l.toLowerCase() !== 'all'));
+  return cleaned.length > 0 ? cleaned : ['Main Location'];
+};
+
+const defaultBranchLocation = (rows: string[]): string =>
+  branchLocationOptions(rows).find(l => l === 'Main Location') ??
+  branchLocationOptions(rows)[0] ??
+  'Main Location';
+
 type Nav = NativeStackNavigationProp<ProductsStackParamList, 'ItemForm'>;
 type Route = RouteProp<ProductsStackParamList, 'ItemForm'>;
 
-const KEYBOARD_SCROLL_PADDING = 320;
+/** Room below the last field so it clears the keyboard while typing */
+const KEYBOARD_SCROLL_PADDING = 140;
 
 const Label: React.FC<{ children: string }> = ({ children }) => (
   <Text style={[typography.label, { color: colors.textSecondary, marginBottom: 6, marginTop: 12 }]}>
@@ -49,13 +77,15 @@ export const ItemFormScreen: React.FC = () => {
   const { currency } = usePosSettings();
   const { showErrorFromUnknown, showConfirm } = useErrorDialog();
   const notifyRefresh = useDataRefreshNotify();
-  const scrollRef = useRef<ScrollView>(null);
   const itemId = route.params?.itemId != null ? Number(route.params.itemId) : undefined;
   const isEdit = itemId != null && !Number.isNaN(itemId);
 
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollOffsetY = useRef(0);
+  const keyboardTopY = useRef<number | null>(null);
+
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [keyboardPadding, setKeyboardPadding] = useState(0);
   const [itemNumber, setItemNumber] = useState('');
   const [description, setDescription] = useState('');
   const [location, setLocation] = useState('Main Location');
@@ -74,12 +104,34 @@ export const ItemFormScreen: React.FC = () => {
   const [categories, setCategories] = useState<ItemCategory[]>([]);
   const [categoryId, setCategoryId] = useState<number | null>(null);
   const [subCategoryId, setSubCategoryId] = useState<number | 'all'>('all');
+  /** file:// URI shown in the preview (stored photo or a freshly picked one) */
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
+  /** Newly picked photo waiting to be copied to phone storage on save */
+  const [pendingPhotoUri, setPendingPhotoUri] = useState<string | null>(null);
+  const [photoRemoved, setPhotoRemoved] = useState(false);
 
-  const scrollToFocusedField = useCallback(() => {
+  /**
+   * Scroll just enough to keep the focused input above the keyboard.
+   * Does nothing when the field is already visible (no over-scrolling).
+   */
+  const ensureFocusedInputVisible = useCallback(() => {
+    const input = TextInput.State.currentlyFocusedInput();
+    const keyboardTop = keyboardTopY.current;
+    if (!input || keyboardTop == null) {
+      return;
+    }
     requestAnimationFrame(() => {
-      setTimeout(() => {
-        scrollRef.current?.scrollToEnd({ animated: true });
-      }, Platform.OS === 'android' ? 120 : 60);
+      input.measureInWindow((_x, y, _w, h) => {
+        const statusBar = Platform.OS === 'android' ? StatusBar.currentHeight ?? 0 : 0;
+        const inputBottom = y + statusBar + h;
+        const visibleLimit = keyboardTop - 20;
+        if (inputBottom > visibleLimit) {
+          scrollRef.current?.scrollTo({
+            y: Math.max(0, scrollOffsetY.current + (inputBottom - visibleLimit)),
+            animated: true,
+          });
+        }
+      });
     });
   }, []);
 
@@ -88,33 +140,22 @@ export const ItemFormScreen: React.FC = () => {
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
     const showSub = Keyboard.addListener(showEvent, event => {
-      setKeyboardPadding(event.endCoordinates.height + 24);
-      scrollToFocusedField();
+      keyboardTopY.current = event.endCoordinates.screenY;
+      // Two passes: the first right after the keyboard settles, the second
+      // after KeyboardAvoidingView padding has rendered — bottom fields (SKU)
+      // need that space before the scroll can reach them.
+      setTimeout(ensureFocusedInputVisible, Platform.OS === 'android' ? 90 : 40);
+      setTimeout(ensureFocusedInputVisible, 300);
     });
     const hideSub = Keyboard.addListener(hideEvent, () => {
-      setKeyboardPadding(0);
+      keyboardTopY.current = null;
     });
 
     return () => {
       showSub.remove();
       hideSub.remove();
     };
-  }, [scrollToFocusedField]);
-
-  const loadCategories = async (loc: string) => {
-    try {
-      const cats = await inventoryService.getCategories({
-        location: loc && loc !== 'all' ? loc : undefined,
-      });
-      setCategories(cats);
-    } catch {
-      setCategories([]);
-    }
-  };
-
-  useEffect(() => {
-    loadCategories(location);
-  }, [location]);
+  }, [ensureFocusedInputVisible]);
 
   useEffect(() => {
     let cancelled = false;
@@ -122,16 +163,22 @@ export const ItemFormScreen: React.FC = () => {
     (async () => {
       setLoading(true);
       try {
-        const list = await inventoryService.list();
+        const [list, categoryResult] = await Promise.all([
+          inventoryService.list(),
+          inventoryService.getCategories({ location: 'all' }),
+        ]);
         if (cancelled) {
           return;
         }
-        setLocations(
-          list.filters.locations.length ? list.filters.locations : ['Main Location'],
+        const allCategories = mergeCategoryLists(
+          categoryResult,
+          deriveCategoriesFromItems(list.items),
         );
+        setLocations(branchLocationOptions(list.filters.locations));
         setProductTypes(
           list.filters.product_types.length ? list.filters.product_types : ['Retail'],
         );
+        setCategories(allCategories);
 
         if (isEdit && itemId) {
           const item = await inventoryService.getItem(itemId);
@@ -140,7 +187,11 @@ export const ItemFormScreen: React.FC = () => {
           }
           setItemNumber(item.item_number ?? '');
           setDescription(item.description);
-          setLocation(item.location ?? 'Main Location');
+          setLocation(
+            item.location && item.location.toLowerCase() !== 'all'
+              ? item.location
+              : defaultBranchLocation(list.filters.locations),
+          );
           setProductType(item.product_type ?? 'Retail');
           setSellingPrice(String(item.selling_price ?? 0));
           setPurchasePrice(String(item.purchase_price ?? 0));
@@ -154,19 +205,18 @@ export const ItemFormScreen: React.FC = () => {
           );
           setMaxDiscount(String(item.max_discount ?? 0));
 
-          const cats = await inventoryService.getCategories({
-            location: item.location ?? undefined,
-          });
-          if (cancelled) {
-            return;
+          const storedPhoto = await getStoredItemImage(
+            itemImageKey({ item_number: item.item_number, id: itemId }),
+          );
+          if (!cancelled && storedPhoto) {
+            setPhotoUri(toFileUri(storedPhoto));
           }
-          setCategories(cats);
 
           if (item.item_category_id != null) {
             setCategoryId(item.item_category_id);
             setSubCategoryId(item.item_sub_category_id ?? 'all');
           } else if (item.category) {
-            const cat = cats.find(
+            const cat = allCategories.find(
               c => c.name.toLowerCase() === item.category!.toLowerCase(),
             );
             if (cat) {
@@ -191,11 +241,7 @@ export const ItemFormScreen: React.FC = () => {
             return;
           }
           setItemNumber(nextNo);
-          const loc =
-            list.filters.locations.find(l => l === 'Main Location') ??
-            list.filters.locations[0] ??
-            'Main Location';
-          setLocation(loc);
+          setLocation(defaultBranchLocation(list.filters.locations));
           setProductType(list.filters.product_types[0] ?? 'Retail');
           setCategoryId(null);
           setSubCategoryId('all');
@@ -219,6 +265,19 @@ export const ItemFormScreen: React.FC = () => {
     };
   }, [isEdit, itemId, navigation, showErrorFromUnknown]);
 
+  const locationChipOptions = useMemo(() => {
+    const opts = branchLocationOptions(locations);
+    const trimmed = location.trim();
+    if (
+      trimmed &&
+      trimmed.toLowerCase() !== 'all' &&
+      !opts.includes(trimmed)
+    ) {
+      return [trimmed, ...opts];
+    }
+    return opts;
+  }, [locations, location]);
+
   const buildPayload = (): ItemPayload => {
     const activeCategory = categories.find(c => c.id === categoryId);
     const activeSub =
@@ -233,7 +292,10 @@ export const ItemFormScreen: React.FC = () => {
       item_number: itemNumber.trim() || undefined,
       auto_generate_item_number: isEdit ? false : !itemNumber.trim(),
       description: description.trim(),
-      location,
+      location:
+        location.trim().toLowerCase() === 'all'
+          ? defaultBranchLocation(locations)
+          : location.trim(),
       product_type: productType,
       item_category_id: categoryId,
       item_sub_category_id: activeSub?.id ?? null,
@@ -253,6 +315,41 @@ export const ItemFormScreen: React.FC = () => {
     };
   };
 
+  const handlePickPhoto = async () => {
+    try {
+      const uri = await pickItemPhotoFromGallery();
+      if (uri) {
+        setPhotoUri(uri);
+        setPendingPhotoUri(uri);
+        setPhotoRemoved(false);
+      }
+    } catch (e) {
+      showErrorFromUnknown(e, 'Item photo');
+    }
+  };
+
+  const handleRemovePhoto = () => {
+    setPhotoUri(null);
+    setPendingPhotoUri(null);
+    setPhotoRemoved(true);
+  };
+
+  const syncPhotoToStorage = async (savedItemNumber: string | null) => {
+    const key = itemImageKey({
+      item_number: savedItemNumber ?? itemNumber,
+      id: itemId ?? null,
+    });
+    try {
+      if (photoRemoved) {
+        await removeItemImage(key);
+      } else if (pendingPhotoUri) {
+        await saveItemImage(key, pendingPhotoUri);
+      }
+    } catch {
+      // Photo is device-only; a copy failure must not block the item save
+    }
+  };
+
   const handleSave = async () => {
     if (!description.trim()) {
       showErrorFromUnknown(new Error('Description is required'), 'Item');
@@ -261,11 +358,11 @@ export const ItemFormScreen: React.FC = () => {
     setSubmitting(true);
     try {
       const payload = buildPayload();
-      if (isEdit && itemId) {
-        await inventoryService.updateItem(itemId, payload);
-      } else {
-        await inventoryService.createItem(payload);
-      }
+      const saved =
+        isEdit && itemId
+          ? await inventoryService.updateItem(itemId, payload)
+          : await inventoryService.createItem(payload);
+      await syncPhotoToStorage(saved.item_number ?? null);
       notifyRefresh(['inventory', 'dashboard', 'sales', 'reports']);
       showConfirm({
         title: isEdit ? 'Item updated' : 'Item added',
@@ -289,18 +386,20 @@ export const ItemFormScreen: React.FC = () => {
     );
   }
 
-  const bottomPad = Math.max(keyboardPadding, KEYBOARD_SCROLL_PADDING);
-
   return (
     <ScreenContainer>
       <AppHeader title={isEdit ? 'Modify item' : 'Add item'} showBack />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior="padding"
         keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 56 : 0}>
         <SmoothScrollView
           ref={scrollRef}
-          contentContainerStyle={[styles.scroll, { paddingBottom: bottomPad }]}
+          contentContainerStyle={[styles.scroll, { paddingBottom: KEYBOARD_SCROLL_PADDING }]}
+          onScroll={event => {
+            scrollOffsetY.current = event.nativeEvent.contentOffset.y;
+          }}
+          scrollEventThrottle={16}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
           automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}>
@@ -313,7 +412,7 @@ export const ItemFormScreen: React.FC = () => {
               placeholder="Auto-generated if empty"
               placeholderTextColor={appInputPlaceholderColor}
               editable={!submitting}
-              onFocus={scrollToFocusedField}
+              onFocus={ensureFocusedInputVisible}
             />
 
             <Label>Description *</Label>
@@ -324,20 +423,76 @@ export const ItemFormScreen: React.FC = () => {
               placeholder="Product name"
               placeholderTextColor={appInputPlaceholderColor}
               editable={!submitting}
-              onFocus={scrollToFocusedField}
+              onFocus={ensureFocusedInputVisible}
             />
+
+            <Label>Item photo</Label>
+            <Text size="xs" color={colors.textMuted} mb="$2">
+              Saved on this phone only — shown on the sales product cards.
+            </Text>
+            <Box flexDirection="row" alignItems="center" gap="$3">
+              <Pressable
+                onPress={handlePickPhoto}
+                disabled={submitting}
+                style={photoStyles.photoBox}
+                accessibilityRole="button"
+                accessibilityLabel={photoUri ? 'Change item photo' : 'Add item photo'}>
+                {photoUri ? (
+                  <Image
+                    source={{ uri: photoUri }}
+                    style={photoStyles.photo}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <Box alignItems="center" gap="$1">
+                    <Camera size={22} color={colors.textMuted} />
+                    <Text size="2xs" color={colors.textMuted}>
+                      Add photo
+                    </Text>
+                  </Box>
+                )}
+              </Pressable>
+              <VStack gap="$2" flex={1}>
+                <Pressable
+                  onPress={handlePickPhoto}
+                  disabled={submitting}
+                  style={photoStyles.photoBtn}>
+                  <Camera size={14} color={colors.text} />
+                  <Text size="xs" fontWeight="$bold" color={colors.text}>
+                    {photoUri ? 'Change photo' : 'Choose from gallery'}
+                  </Text>
+                </Pressable>
+                {photoUri ? (
+                  <Pressable
+                    onPress={handleRemovePhoto}
+                    disabled={submitting}
+                    style={[photoStyles.photoBtn, photoStyles.photoBtnDanger]}>
+                    <Trash2 size={14} color={colors.error} />
+                    <Text size="xs" fontWeight="$bold" color={colors.error}>
+                      Remove photo
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </VStack>
+            </Box>
 
             <Label>Location</Label>
+            <Text size="xs" fontWeight="$bold" color={colors.text} mb="$1.5">
+              Branch: {location}
+            </Text>
             <FilterChips
-              options={locations}
+              options={locationChipOptions}
               selected={location}
               onSelect={nextLocation => {
+                if (nextLocation.toLowerCase() === 'all') {
+                  return;
+                }
                 setLocation(nextLocation);
-                setCategoryId(null);
-                setSubCategoryId('all');
               }}
+              showAllOption={false}
             />
 
+            <Label>Category</Label>
             <PosCategoryBar
               categories={categories}
               selectedCategoryId={categoryId}
@@ -359,7 +514,7 @@ export const ItemFormScreen: React.FC = () => {
               value={sellingPrice}
               onChangeText={setSellingPrice}
               editable={!submitting}
-              onFocus={scrollToFocusedField}
+              onFocus={ensureFocusedInputVisible}
             />
 
             <Label>Purchase price</Label>
@@ -368,7 +523,7 @@ export const ItemFormScreen: React.FC = () => {
               value={purchasePrice}
               onChangeText={setPurchasePrice}
               editable={!submitting}
-              onFocus={scrollToFocusedField}
+              onFocus={ensureFocusedInputVisible}
             />
 
             <Label>Quantity on hand</Label>
@@ -380,7 +535,7 @@ export const ItemFormScreen: React.FC = () => {
               placeholder="0"
               placeholderTextColor={appInputPlaceholderColor}
               editable={!submitting}
-              onFocus={scrollToFocusedField}
+              onFocus={ensureFocusedInputVisible}
             />
 
             <Label>Reorder level</Label>
@@ -392,7 +547,7 @@ export const ItemFormScreen: React.FC = () => {
               placeholder="0"
               placeholderTextColor={appInputPlaceholderColor}
               editable={!submitting}
-              onFocus={scrollToFocusedField}
+              onFocus={ensureFocusedInputVisible}
             />
 
             <Label>Unit of measure (UOM)</Label>
@@ -412,7 +567,7 @@ export const ItemFormScreen: React.FC = () => {
               placeholder="Pcs"
               placeholderTextColor={appInputPlaceholderColor}
               editable={!submitting}
-              onFocus={scrollToFocusedField}
+              onFocus={ensureFocusedInputVisible}
             />
 
             <Label>SKU</Label>
@@ -425,7 +580,7 @@ export const ItemFormScreen: React.FC = () => {
               editable={!submitting}
               autoCapitalize="characters"
               autoCorrect={false}
-              onFocus={scrollToFocusedField}
+              onFocus={ensureFocusedInputVisible}
             />
 
             <Box mt="$6">
@@ -470,5 +625,39 @@ const styles = StyleSheet.create({
   scroll: {
     flexGrow: 1,
     paddingTop: 4,
+  },
+});
+
+const photoStyles = StyleSheet.create({
+  photoBox: {
+    width: 96,
+    height: 96,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  photo: {
+    width: '100%',
+    height: '100%',
+  },
+  photoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
+    borderRadius: 999,
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+  },
+  photoBtnDanger: {
+    borderColor: colors.pastelPink,
+    backgroundColor: colors.errorSoft,
   },
 });

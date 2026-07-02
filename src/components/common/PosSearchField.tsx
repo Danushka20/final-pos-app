@@ -1,16 +1,17 @@
-import React, { useState } from 'react';
-import { Platform, StyleSheet, TextInput, type TextInputProps } from 'react-native';
+import React, { useState, type ReactNode } from 'react';
+import { Platform, StyleSheet, TextInput, View, type TextInputProps } from 'react-native';
 import { Search } from 'lucide-react-native';
-import { Box } from '@gluestack-ui/themed';
 import { colors, appInputPlaceholderColor, typography } from '@/theme';
 
 interface PosSearchFieldProps extends TextInputProps {
   containerStyle?: TextInputProps['style'];
+  endAdornment?: ReactNode;
 }
 
 export const PosSearchField: React.FC<PosSearchFieldProps> = ({
   style,
   containerStyle,
+  endAdornment,
   onFocus,
   onBlur,
   ...props
@@ -18,7 +19,7 @@ export const PosSearchField: React.FC<PosSearchFieldProps> = ({
   const [focused, setFocused] = useState(false);
 
   return (
-    <Box
+    <View
       style={[
         styles.wrap,
         focused && styles.wrapFocused,
@@ -42,7 +43,8 @@ export const PosSearchField: React.FC<PosSearchFieldProps> = ({
           onBlur?.(e);
         }}
       />
-    </Box>
+      {endAdornment ? <View style={styles.endAdornment}>{endAdornment}</View> : null}
+    </View>
   );
 };
 
@@ -81,5 +83,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     color: colors.text,
     fontSize: 15,
+  },
+  endAdornment: {
+    marginLeft: 4,
   },
 });

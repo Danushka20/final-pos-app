@@ -1,30 +1,33 @@
 import React, { useEffect, useMemo } from 'react';
-import { Keyboard, StyleSheet, View } from 'react-native';
+import { Keyboard, Pressable, StyleSheet, View } from 'react-native';
 import { Text } from 'react-native-paper';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { PauseCircle } from 'lucide-react-native';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { LoadingOverlay } from '@/components/common/LoadingOverlay';
 import { PosCategoryBar } from '@/components/sales/PosCategoryBar';
-import { PosSalesHeader } from '@/components/sales/PosSalesHeader';
 import { SaleModeToggle } from '@/components/sales/SaleModeToggle';
 import { ReturnSalePicker } from '@/components/sales/ReturnSalePicker';
 import { PosProductGrid } from '@/components/sales/PosProductGrid';
 import { PosBatchSelectModal } from '@/components/sales/PosBatchSelectModal';
-import { FloatingCartFab } from '@/components/sales/FloatingCartFab';
+import { PosDockCartBar } from '@/components/sales/PosDockCartBar';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSaleContext } from '@/context/PosSaleContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
-import { colors, FLOATING_FAB_HEIGHT, TAB_BAR_SCROLL_PADDING } from '@/theme';
+import { colors, TAB_BAR_SCROLL_PADDING } from '@/theme';
+import { summarizeCartQtyByUom } from '@/utils/uom';
 import type { SalesStackParamList } from '@/navigation/types';
 import type { InventoryItem } from '@/types/sales';
 
-const FLOATING_CART_HEIGHT = FLOATING_FAB_HEIGHT + 20;
+const DOCK_CART_HEIGHT = 88;
 
 type Nav = NativeStackNavigationProp<SalesStackParamList, 'SalesPOS'>;
 
 export const SalesScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
+  const insets = useSafeAreaInsets();
   const { showError } = useErrorDialog();
   const { currency } = usePosSettings();
   const pos = usePosSaleContext();
@@ -39,6 +42,11 @@ export const SalesScreen: React.FC = () => {
 
   const selectedCount = useMemo(
     () => pos.cart.reduce((n, line) => n + line.qty, 0),
+    [pos.cart],
+  );
+
+  const cartQtySummary = useMemo(
+    () => summarizeCartQtyByUom(pos.cart),
     [pos.cart],
   );
 
@@ -83,6 +91,13 @@ export const SalesScreen: React.FC = () => {
     [pos.cart],
   );
 
+  const handleAddItem = (item: InventoryItem) => {
+    const added = pos.tryAddToCart(item, 1);
+    if (added) {
+      openOrder();
+    }
+  };
+
   const handleOpenBatchTable = (item: InventoryItem) => {
     Keyboard.dismiss();
     void pos.openBatchPicker(item, 1);
@@ -90,51 +105,67 @@ export const SalesScreen: React.FC = () => {
 
   const listBottomInset =
     selectedCount > 0
-      ? FLOATING_CART_HEIGHT + TAB_BAR_SCROLL_PADDING + 12
-      : TAB_BAR_SCROLL_PADDING + 12;
+      ? DOCK_CART_HEIGHT + TAB_BAR_SCROLL_PADDING + 16
+      : TAB_BAR_SCROLL_PADDING + 16;
 
   return (
-    <ScreenContainer swipeMode="off">
-      <PosSalesHeader
-        title={pos.isReturn ? 'Return' : 'Items'}
-        badge={pos.salesId ? `#${pos.salesId}` : undefined}
-        holdOrdersLabel="Hold list"
-        onHoldOrdersPress={pos.isReturn ? undefined : () => navigation.navigate('HoldOrders')}
-      />
-
+    <ScreenContainer swipeMode="off" style={styles.screen}>
       {pos.loading || pos.loadingReturnSale ? (
         <LoadingOverlay
           message={pos.loadingReturnSale ? 'Loading sale…' : 'Loading products…'}
         />
       ) : null}
 
-      <View style={styles.flex}>
-        <View style={styles.filtersBlock}>
-          <SaleModeToggle
-            mode={pos.transactionMode}
-            onChange={pos.switchTransactionMode}
-            compact
-          />
-          {pos.isReturn ? <ReturnSalePicker /> : null}
+      <View style={[styles.topArea, { paddingTop: insets.top + 8 }]}>
+        <View style={styles.metaRow}>
+          <View style={styles.metaTextCol}>
+            <Text style={styles.metaTitle}>
+              {pos.isReturn ? 'Return' : 'Menu'}
+            </Text>
+            {!pos.isReturn ? (
+              <Text style={styles.metaSub} numberOfLines={1}>
+                {pos.catalogScopeLabel}
+              </Text>
+            ) : null}
+          </View>
 
-          {canBrowseItems ? (
-            <>
-              <PosCategoryBar
-                categories={pos.categories}
-                selectedCategoryId={pos.categoryId}
-                selectedSubCategoryId={pos.subCategoryId}
-                onSelectCategory={pos.setCategoryId}
-                onSelectSubCategory={pos.setSubCategoryId}
-              />
-              {selectedCount > 0 ? (
-                <Text style={styles.tip}>
-                  Wrong item? Tap − on the card, or open Order to edit.
-                </Text>
-              ) : null}
-            </>
+          {!pos.isReturn ? (
+            <Pressable
+              onPress={() => navigation.navigate('HoldOrders')}
+              style={styles.holdBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Hold orders">
+              <PauseCircle size={16} color={colors.text} />
+              <Text style={styles.holdBtnText}>Hold</Text>
+            </Pressable>
+          ) : null}
+
+          {pos.salesId ? (
+            <View style={styles.saleBadge}>
+              <Text style={styles.saleBadgeText}>#{pos.salesId}</Text>
+            </View>
           ) : null}
         </View>
 
+        <SaleModeToggle
+          mode={pos.transactionMode}
+          onChange={pos.switchTransactionMode}
+          compact
+        />
+
+        {canBrowseItems ? (
+          <PosCategoryBar
+            categories={pos.categories}
+            selectedCategoryId={pos.categoryId}
+            selectedSubCategoryId={pos.subCategoryId}
+            onSelectCategory={pos.setCategoryId}
+            onSelectSubCategory={pos.setSubCategoryId}
+          />
+        ) : null}
+        {pos.isReturn ? <ReturnSalePicker /> : null}
+      </View>
+
+      <View style={styles.flex}>
         <View style={styles.gridArea}>
           {!canBrowseItems ? (
             <Text style={styles.hint}>
@@ -146,13 +177,14 @@ export const SalesScreen: React.FC = () => {
               currency={currency}
               refreshing={pos.isReturn ? false : pos.itemsRefreshing}
               onRefresh={pos.isReturn ? () => {} : pos.refreshProducts}
-              onAddItem={item => pos.tryAddToCart(item, 1)}
+              onAddItem={handleAddItem}
+              onOpenOrder={() => openOrder()}
               onIncrementItem={item => pos.tryAddToCart(item, 1)}
               onRemoveItem={item =>
-                pos.decrementCartQty(item.id, item.sale_line_batch_id ?? null)
+                pos.decrementDisplayCartQty(item, item.sale_line_batch_id ?? null)
               }
               onRemoveAll={item =>
-                pos.removeFromCart(item.id, item.sale_line_batch_id ?? null)
+                pos.removeDisplayFromCart(item, item.sale_line_batch_id ?? null)
               }
               onOpenBatches={
                 pos.isReturn ? undefined : handleOpenBatchTable
@@ -161,7 +193,7 @@ export const SalesScreen: React.FC = () => {
               getCartQty={item =>
                 item.return_line_key != null
                   ? pos.getCartLineQty(item.id, item.sale_line_batch_id ?? null)
-                  : pos.getCartQty(item.id)
+                  : pos.getDisplayCartQty(item)
               }
               cartRevision={cartRevision}
               canSellItem={item => pos.canSellItem(item, 1).ok}
@@ -175,11 +207,12 @@ export const SalesScreen: React.FC = () => {
         </View>
       </View>
 
-      <FloatingCartFab
-        itemCount={selectedCount}
+      <PosDockCartBar
+        itemCount={pos.cart.length}
+        qtySummary={cartQtySummary}
         total={pos.netAmount}
         currency={currency}
-        isReturn={pos.isReturn}
+        actionLabel={pos.isReturn ? 'Return' : 'Next'}
         onPress={openOrder}
       />
 
@@ -190,7 +223,7 @@ export const SalesScreen: React.FC = () => {
         loading={pos.batchPickerLoading}
         error={pos.batchPickerError}
         currency={currency}
-        branchLocation={pos.location}
+        branchLocation={pos.batchPickerItem?.location ?? pos.location}
         defaultQty={pos.batchPickerQty}
         allowNegativeInventory={pos.allowNegativeInventory}
         onClose={pos.closeBatchPicker}
@@ -202,22 +235,69 @@ export const SalesScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  screen: {
+    backgroundColor: colors.backgroundAlt,
+  },
+  topArea: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    gap: 10,
+    backgroundColor: colors.backgroundAlt,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  metaTextCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  metaTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  metaSub: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+    fontWeight: '600',
+  },
+  holdBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  holdBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  saleBadge: {
+    backgroundColor: colors.text,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  saleBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.textOnPrimary,
+  },
   flex: {
     flex: 1,
-  },
-  filtersBlock: {
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 8,
-    backgroundColor: colors.backgroundAlt,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    gap: 4,
   },
   gridArea: {
     flex: 1,
     paddingHorizontal: 4,
-    paddingTop: 6,
+    paddingTop: 4,
     paddingBottom: 4,
   },
   hint: {
@@ -225,13 +305,5 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     paddingVertical: 32,
     paddingHorizontal: 16,
-  },
-  tip: {
-    textAlign: 'center',
-    color: colors.textSecondary,
-    fontSize: 11,
-    fontWeight: '600',
-    paddingTop: 4,
-    paddingBottom: 2,
   },
 });
