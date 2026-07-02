@@ -1,83 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
 import { inventoryService } from '@/services/api/inventoryService';
-import type {
-  ItemCategory,
-  InventoryFilters,
-} from '@/types/inventory';
+import {
+  deriveCategoriesFromItems,
+  mergeCategoryLists,
+} from '@/utils/inventoryCategoryUtils';
+import type { ItemCategory } from '@/types/inventory';
 import type { InventoryItem } from '@/types/sales';
-
-const deriveCategoriesFromItems = (rows: InventoryItem[]): ItemCategory[] => {
-  const map = new Map<
-    string,
-    {
-      id: number;
-      name: string;
-      sub: Map<string, { id: number; name: string }>;
-    }
-  >();
-  let generatedCategoryId = -1;
-  let generatedSubId = -1;
-
-  for (const item of rows) {
-    const categoryName = item.category?.trim();
-    if (!categoryName) {
-      continue;
-    }
-    const categoryKey =
-      item.item_category_id != null
-        ? `id:${item.item_category_id}`
-        : `name:${categoryName.toLowerCase()}`;
-
-    let category = map.get(categoryKey);
-    if (!category) {
-      category = {
-        id: item.item_category_id ?? generatedCategoryId--,
-        name: categoryName,
-        sub: new Map<string, { id: number; name: string }>(),
-      };
-      map.set(categoryKey, category);
-    }
-
-    const subName = item.sub_category?.trim();
-    if (!subName) {
-      continue;
-    }
-    const subKey =
-      item.item_sub_category_id != null
-        ? `id:${item.item_sub_category_id}`
-        : `name:${subName.toLowerCase()}`;
-    if (!category.sub.has(subKey)) {
-      category.sub.set(subKey, {
-        id: item.item_sub_category_id ?? generatedSubId--,
-        name: subName,
-      });
-    }
-  }
-
-  return [...map.values()]
-    .map(c => ({
-      id: c.id,
-      name: c.name,
-      sub_categories: [...c.sub.values()].sort((a, b) =>
-        a.name.localeCompare(b.name),
-      ),
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
-};
 
 export const useInventory = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<InventoryItem[]>([]);
-  const [filters, setFilters] = useState<InventoryFilters>({
-    product_types: [],
-    locations: [],
-  });
   const [categories, setCategories] = useState<ItemCategory[]>([]);
-  const [location, setLocation] = useState('all');
-  const [productType, setProductType] = useState('all');
   const [categoryId, setCategoryId] = useState<number | 'all'>('all');
+  const [subCategoryId, setSubCategoryId] = useState<number | 'all'>('all');
   const [search, setSearch] = useState('');
 
   const load = useCallback(async (silent = false) => {
@@ -86,13 +23,18 @@ export const useInventory = () => {
       setError(null);
     }
     try {
-      const list = await inventoryService.list({
-        location: location === 'all' ? undefined : location,
-        product_type: productType === 'all' ? undefined : productType,
-      });
+      const [list, categoryResult] = await Promise.all([
+        inventoryService.list(),
+        inventoryService.getCategories({ location: 'all' }),
+      ]);
+
       setItems(list.items);
-      setFilters(list.filters);
-      setCategories(deriveCategoriesFromItems(list.items));
+      setCategories(
+        mergeCategoryLists(
+          categoryResult,
+          deriveCategoriesFromItems(list.items),
+        ),
+      );
       if (!silent) {
         setError(null);
       }
@@ -105,7 +47,7 @@ export const useInventory = () => {
         setLoading(false);
       }
     }
-  }, [location, productType]);
+  }, []);
 
   useEffect(() => {
     load(false);
@@ -123,8 +65,43 @@ export const useInventory = () => {
     const exists = categories.some(c => c.id === categoryId);
     if (!exists) {
       setCategoryId('all');
+      setSubCategoryId('all');
     }
   }, [categories, categoryId]);
+
+  useEffect(() => {
+    if (subCategoryId === 'all' || categoryId === 'all') {
+      return;
+    }
+    const cat = categories.find(c => c.id === categoryId);
+    const exists = cat?.sub_categories.some(s => s.id === subCategoryId);
+    if (!exists) {
+      setSubCategoryId('all');
+    }
+  }, [categories, categoryId, subCategoryId]);
+
+  const handleSetCategoryId = useCallback((value: number | 'all') => {
+    setCategoryId(value);
+    setSubCategoryId('all');
+  }, []);
+
+  const selectedCategory = useMemo(
+    () =>
+      categoryId === 'all'
+        ? null
+        : (categories.find(c => c.id === categoryId) ?? null),
+    [categories, categoryId],
+  );
+
+  const subCategoryOptions = useMemo(
+    () => selectedCategory?.sub_categories ?? [],
+    [selectedCategory],
+  );
+
+  const categoryOptions = useMemo(
+    () => categories.map(c => c.name),
+    [categories],
+  );
 
   const filteredItems = useMemo(() => {
     let rows = items;
@@ -132,8 +109,21 @@ export const useInventory = () => {
       const cat = categories.find(c => c.id === categoryId);
       if (cat) {
         rows = rows.filter(
-          i => i.category === cat.name || i.item_category_id === cat.id,
+          i =>
+            i.item_category_id === cat.id ||
+            i.category?.trim().toLowerCase() === cat.name.trim().toLowerCase(),
         );
+        if (subCategoryId !== 'all') {
+          const sub = cat.sub_categories.find(s => s.id === subCategoryId);
+          if (sub) {
+            rows = rows.filter(
+              i =>
+                i.item_sub_category_id === sub.id ||
+                i.sub_category?.trim().toLowerCase() ===
+                  sub.name.trim().toLowerCase(),
+            );
+          }
+        }
       }
     }
     const q = search.trim().toLowerCase();
@@ -146,20 +136,19 @@ export const useInventory = () => {
       );
     }
     return rows;
-  }, [items, categories, categoryId, search]);
+  }, [items, categories, categoryId, subCategoryId, search]);
 
   return {
     loading,
     error,
     items: filteredItems,
-    filters,
     categories,
-    location,
-    setLocation,
-    productType,
-    setProductType,
+    categoryOptions,
     categoryId,
-    setCategoryId,
+    setCategoryId: handleSetCategoryId,
+    subCategoryId,
+    setSubCategoryId,
+    subCategoryOptions,
     search,
     setSearch,
     refresh: () => load(false),

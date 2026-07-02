@@ -70,7 +70,7 @@ export const PurchaseCreateScreen: React.FC = () => {
     <ScreenContainer swipeMode="off">
       <AppHeader
         title="New purchase"
-        subtitle={`#${purchase.invoiceId || '…'} · All products`}
+        subtitle={`#${purchase.invoiceId || '…'} · All locations`}
         showBack
       />
 

@@ -11,13 +11,15 @@ import { SmoothScrollView } from '@/components/common/SmoothScrollView';
 import { Box, HStack, Pressable, Text, VStack } from '@gluestack-ui/themed';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { ChevronRight, Trash2, User } from 'lucide-react-native';
+import { ChevronRight, User } from 'lucide-react-native';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { AppHeader } from '@/components/common/AppHeader';
 import { LoadingOverlay } from '@/components/common/LoadingOverlay';
 import { SelectionModal } from '@/components/common/SelectionModal';
 import { PrimaryButton } from '@/components/buttons/PrimaryButton';
 import { OrderCheckoutFooter } from '@/components/sales/OrderCheckoutFabBar';
+import { CartOffersSummary } from '@/components/sales/CartOffersSummary';
+import { SaleOrderLineRow } from '@/components/sales/SaleOrderLineRow';
 import { FilterChips } from '@/components/common/FilterChips';
 import { PaymentMethodPicker } from '@/components/sales/PaymentMethodPicker';
 import { PaymentMethodDetails } from '@/components/sales/PaymentMethodDetails';
@@ -30,8 +32,7 @@ import { isInvalidHoldPinError } from '@/services/storage/holdPinStorage';
 import { useSavedHoldPin } from '@/hooks/useSavedHoldPin';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
 import { formatCurrency } from '@/utils/format';
-import { cartLineKey } from '@/utils/batchUtils';
-import { formatPricePerUom, resolveLineUom } from '@/utils/uom';
+import { cartLineKey, itemHasBatches } from '@/utils/batchUtils';
 import {
   buildPaymentNotes,
   isOnlinePayment,
@@ -42,7 +43,9 @@ import type { CartLine, SaleReceiptPayload } from '@/types/sales';
 import {
   colors,
   appInputStyle,
+  appInputPlaceholderColor,
   typography,
+  shadows,
 } from '@/theme';
 import type { SalesStackParamList } from '@/navigation/types';
 
@@ -90,6 +93,16 @@ export const SaleOrderScreen: React.FC = () => {
   const [holding, setHolding] = useState(false);
   const [qtyDrafts, setQtyDrafts] = useState<Record<string, string>>({});
 
+  const productOffers = useMemo(
+    () => pos.applicableOffers.filter(o => o.discount_type === 'product'),
+    [pos.applicableOffers],
+  );
+
+  const orderOffers = useMemo(
+    () => pos.applicableOffers.filter(o => o.discount_type === 'order'),
+    [pos.applicableOffers],
+  );
+
   const applyPosDiscount =
     pos.applyOrderDiscount ??
     ((type: 'percent' | 'amount', value: number) => {
@@ -118,9 +131,31 @@ export const SaleOrderScreen: React.FC = () => {
     [getEffectiveQty],
   );
 
-  const previewSubTotal = useMemo(() => pos.subTotal, [pos.subTotal]);
+  const previewSubTotal = useMemo(
+    () =>
+      round2(
+        pos.cart.reduce((sum, line) => sum + getLineTotalPreview(line), 0),
+      ),
+    [getLineTotalPreview, pos.cart],
+  );
 
-  const previewOrderTotal = useMemo(() => pos.netAmount, [pos.netAmount]);
+  const previewOrderTotal = useMemo(
+    () => round2(Math.max(0, previewSubTotal - pos.discount - pos.offerDiscount)),
+    [pos.discount, pos.offerDiscount, previewSubTotal],
+  );
+
+  const buildCheckoutCart = useCallback((): CartLine[] => {
+    return pos.cart.map(line => {
+      const key = cartLineKey(line.item_id, line.item_batch_id);
+      const parsed = parseDraftQty(qtyDrafts[key]);
+      const qty = parsed !== null && parsed > 0 ? parsed : line.qty;
+      return {
+        ...line,
+        qty,
+        line_total: round2(qty * line.unit_price),
+      };
+    });
+  }, [pos.cart, qtyDrafts]);
 
   useEffect(() => {
     if (pos.activeHoldId) {
@@ -375,9 +410,10 @@ export const SaleOrderScreen: React.FC = () => {
 
   const handlePay = async () => {
     applyDiscountDraft();
+    const checkoutCart = buildCheckoutCart();
     commitAllQtyDrafts();
 
-    if (!pos.isReturn && pos.cartHasStockIssues()) {
+    if (!pos.isReturn && pos.cartHasStockIssuesFor(pos.prepareCheckout(checkoutCart).lines)) {
       showError({
         title: 'Stock issue',
         message: 'Remove or reduce out-of-stock items before payment.',
@@ -461,6 +497,7 @@ export const SaleOrderScreen: React.FC = () => {
       refund_card_last4: pos.isReturn ? refundDigits : null,
       hold_pin: holdPin,
       original_sale_id: pos.isReturn ? originalSaleId.trim() || null : null,
+      cart: checkoutCart,
     });
 
     if (!result) {
@@ -484,9 +521,10 @@ export const SaleOrderScreen: React.FC = () => {
       return;
     }
     applyDiscountDraft();
+    const checkoutCart = buildCheckoutCart();
     commitAllQtyDrafts();
 
-    if (pos.cartHasStockIssues()) {
+    if (pos.cartHasStockIssuesFor(pos.prepareCheckout(checkoutCart).lines)) {
       showError({
         title: 'Stock issue',
         message: 'Remove or reduce out-of-stock items before holding.',
@@ -497,7 +535,7 @@ export const SaleOrderScreen: React.FC = () => {
 
     setHolding(true);
     try {
-      const result = await pos.holdSale();
+      const result = await pos.holdSale(undefined, checkoutCart);
       if (!result) {
         return;
       }
@@ -619,94 +657,90 @@ export const SaleOrderScreen: React.FC = () => {
             </>
           ) : null}
 
-          <Text style={styles.sectionTitle}>
-            {pos.isReturn ? 'Items to return' : 'Order items'}
-          </Text>
-          <Text style={styles.qtyHint}>Type quantity — line total updates as you type.</Text>
+          <View style={styles.cartPanel}>
+            <View style={styles.cartPanelHeader}>
+              <Text style={styles.cartPanelTitle}>
+                {pos.isReturn ? 'Items to return' : 'Cart'}
+              </Text>
+              <Text style={styles.cartPanelCount}>
+                {pos.cart.length} line{pos.cart.length === 1 ? '' : 's'}
+              </Text>
+            </View>
 
-          {pos.cart.map(line => {
-            const lineKey = cartLineKey(line.item_id, line.item_batch_id);
-            const item = itemStockMap.get(line.item_id);
-            const stock = item?.qty ?? 0;
-            const uom = resolveLineUom(line.uom, item?.uom);
-            const outOfStock =
-              !pos.isReturn && !pos.allowNegativeInventory && stock <= 0;
-            const maxReturn = pos.isReturn ? pos.getMaxReturnQty(line.item_id) : undefined;
-            const lineTotalPreview = getLineTotalPreview(line);
+            {!pos.isReturn && pos.allowOffer && pos.applicableOffers.length > 0 ? (
+              <CartOffersSummary
+                productOffers={productOffers}
+                orderOffers={orderOffers}
+                selectedOffer={pos.selectedOffer}
+                subTotal={previewSubTotal}
+                currency={currency}
+                compact={pos.cart.length > 0}
+              />
+            ) : null}
 
-            return (
-              <HStack
-                key={lineKey}
-                style={styles.lineRow}
-                alignItems="center"
-                gap="$2">
-                <VStack flex={1}>
-                  <Text size="sm" fontWeight="$bold" color={colors.text} numberOfLines={2}>
-                    {line.description}
-                  </Text>
-                  <Text size="xs" color={colors.textMuted}>
-                    {line.item_number ? `ID ${line.item_number} · ` : ''}
-                    {formatPricePerUom(formatCurrency(line.unit_price, currency), uom)}
-                    {line.batch_number ? ` · Batch ${line.batch_number}` : ''}
-                    {pos.isReturn && maxReturn != null ? ` · max ${maxReturn} ${uom}` : ''}
-                    {!pos.isReturn && !pos.allowNegativeInventory && !line.item_batch_id
-                      ? ` · stock ${stock} ${uom}`
-                      : ''}
-                  </Text>
-                  {outOfStock ? (
-                    <Text size="2xs" color={colors.error} fontWeight="$bold" mt="$0.5">
-                      Out of stock
-                    </Text>
-                  ) : null}
-                  {!pos.isReturn &&
-                  pos.getOfferLineDiscount(line.item_id, line.item_batch_id ?? null) > 0 ? (
-                    <Text size="2xs" color={colors.success} fontWeight="$bold" mt="$0.5">
-                      Offer -
-                      {formatCurrency(
-                        pos.getOfferLineDiscount(line.item_id, line.item_batch_id ?? null),
-                        currency,
-                      )}
-                    </Text>
-                  ) : null}
-                </VStack>
+            {pos.cart.length > 0 ? (
+              <View style={styles.tableHead}>
+                <Text style={[styles.tableHeadCell, styles.tableHeadProduct]}>Product</Text>
+                <Text style={[styles.tableHeadCell, styles.tableHeadPrice]}>Price</Text>
+                <Text style={[styles.tableHeadCell, styles.tableHeadTotal]}>Total</Text>
+              </View>
+            ) : null}
 
-                <HStack alignItems="center" gap="$2">
-                  <TextInput
-                    value={qtyDrafts[lineKey] ?? String(line.qty)}
-                    onChangeText={text => {
-                      const sanitized = text.replace(/[^0-9.,]/g, '');
-                      setQtyDrafts(prev => ({ ...prev, [lineKey]: sanitized }));
-                    }}
-                    onBlur={() =>
-                      commitLineQty(line, qtyDrafts[lineKey] ?? String(line.qty))
-                    }
-                    onSubmitEditing={() =>
-                      commitLineQty(line, qtyDrafts[lineKey] ?? String(line.qty))
-                    }
-                    keyboardType="decimal-pad"
-                    returnKeyType="done"
-                    selectTextOnFocus
-                    style={styles.qtyInput}
-                    placeholder="Qty"
-                    placeholderTextColor={colors.textMuted}
-                  />
-                  <Text size="xs" color={colors.textSecondary} fontWeight="$bold" minWidth={28}>
-                    {uom}
-                  </Text>
-                  <Pressable
-                    onPress={() => pos.removeFromCart(line.item_id, line.item_batch_id ?? null)}
-                    p="$1.5"
-                    accessibilityLabel="Remove item">
-                    <Trash2 size={18} color={colors.error} />
-                  </Pressable>
-                </HStack>
+            {pos.cart.map(line => {
+              const lineKey = cartLineKey(line.item_id, line.item_batch_id);
+              const item = itemStockMap.get(line.item_id);
+              const stock = item?.qty ?? 0;
+              const outOfStock =
+                !pos.isReturn && !pos.allowNegativeInventory && stock <= 0;
+              const maxReturn = pos.isReturn
+                ? pos.getMaxReturnQty(line.item_id, line.item_batch_id ?? null)
+                : undefined;
+              const lineTotalPreview = getLineTotalPreview(line);
+              const offerLineDiscount = pos.getOfferLineDiscount(
+                line.item_id,
+                line.item_batch_id ?? null,
+              );
 
-                <Text fontWeight="$bold" minWidth={72} textAlign="right">
-                  {formatCurrency(lineTotalPreview, currency)}
-                </Text>
-              </HStack>
-            );
-          })}
+              return (
+                <SaleOrderLineRow
+                  key={lineKey}
+                  line={line}
+                  item={item}
+                  currency={currency}
+                  qtyDraft={qtyDrafts[lineKey] ?? String(line.qty)}
+                  lineTotal={lineTotalPreview}
+                  offerDiscount={offerLineDiscount}
+                  isReturn={pos.isReturn}
+                  allowNegativeInventory={pos.allowNegativeInventory}
+                  maxReturn={maxReturn}
+                  outOfStock={outOfStock}
+                  showBatchInfo={Boolean(item && itemHasBatches(item))}
+                  onQtyDraftChange={text => {
+                    const sanitized = text.replace(/[^0-9.,]/g, '');
+                    setQtyDrafts(prev => ({ ...prev, [lineKey]: sanitized }));
+                  }}
+                  onCommitQty={() =>
+                    commitLineQty(line, qtyDrafts[lineKey] ?? String(line.qty))
+                  }
+                  onDecrement={() =>
+                    pos.decrementCartQty(line.item_id, line.item_batch_id ?? null)
+                  }
+                  onIncrement={() => {
+                    const parsed = parseDraftQty(qtyDrafts[lineKey]);
+                    const current = parsed !== null && parsed > 0 ? parsed : line.qty;
+                    pos.updateCartQty(
+                      line.item_id,
+                      current + 1,
+                      line.item_batch_id ?? null,
+                    );
+                  }}
+                  onRemove={() =>
+                    pos.removeFromCart(line.item_id, line.item_batch_id ?? null)
+                  }
+                />
+              );
+            })}
+          </View>
 
           {!pos.isReturn && pos.allowOffer && pos.applicableOffers.length > 0 ? (
             <>
@@ -1000,26 +1034,63 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     marginTop: -4,
   },
+  cartPanel: {
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 12,
+    marginBottom: 12,
+    ...shadows.sm,
+  },
+  cartPanelHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  cartPanelTitle: {
+    ...typography.label,
+    color: colors.text,
+    fontWeight: '700',
+  },
+  cartPanelCount: {
+    ...typography.caption,
+    color: colors.textMuted,
+    fontWeight: '600',
+  },
+  tableHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+    marginBottom: 4,
+    backgroundColor: colors.backgroundAlt,
+    borderRadius: 6,
+  },
+  tableHeadCell: {
+    ...typography.caption,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+  },
+  tableHeadProduct: {
+    flex: 1,
+  },
+  tableHeadPrice: {
+    width: 72,
+    textAlign: 'right',
+  },
+  tableHeadTotal: {
+    width: 72,
+    textAlign: 'right',
+    marginLeft: 8,
+  },
   refundCardHint: {
     ...typography.caption,
     color: colors.textMuted,
     marginTop: -6,
     marginBottom: 8,
-  },
-  lineRow: {
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.borderLight,
-  },
-  qtyInput: {
-    ...appInputStyle,
-    width: 64,
-    minHeight: 40,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    textAlign: 'center',
-    fontWeight: '700',
-    fontSize: 15,
   },
   discountHint: {
     ...typography.caption,
@@ -1028,11 +1099,14 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   totalBox: {
-    marginTop: 12,
+    marginTop: 4,
     marginBottom: 20,
-    padding: 14,
+    padding: 16,
     borderRadius: 12,
-    backgroundColor: colors.surfaceElevated,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    ...shadows.sm,
   },
   inputReadOnly: {
     backgroundColor: colors.backgroundAlt,

@@ -44,6 +44,16 @@ import {
   itemHasBatches,
 } from '@/utils/batchUtils';
 import { isItemExpired } from '@/utils/expiryUtils';
+import { itemSellableQty } from '@/utils/itemInventoryUtils';
+import {
+  mergePosCatalogAcrossBranches,
+  itemNumberKey,
+  POS_CATALOG_LOCATION,
+  prepareCheckoutCart,
+  resolveCartItemForSale,
+  resolveInventoryRowForCartLine,
+  variantIdsForDisplayItem,
+} from '@/utils/posSaleCatalogMerge';
 
 const WALK_IN: CustomerSummary = {
   id: 0,
@@ -106,6 +116,7 @@ export const usePosSale = () => {
   const offerResolveRef = useRef(0);
   const offerResolveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cartSignatureRef = useRef('');
+  const variantsByItemNumberRef = useRef<Map<string, InventoryItem[]>>(new Map());
   const [offerUserDisabled, setOfferUserDisabled] = useState(false);
   const [batchPickerOpen, setBatchPickerOpen] = useState(false);
   const [batchPickerItem, setBatchPickerItem] = useState<InventoryItem | null>(null);
@@ -172,9 +183,9 @@ export const usePosSale = () => {
     setCustomers(result.customers);
   }, []);
 
-  const loadCategories = useCallback(async (loc?: string) => {
+  const loadCategories = useCallback(async () => {
     const cats = await inventoryService.getCategories({
-      location: loc && loc !== 'all' ? loc : undefined,
+      location: POS_CATALOG_LOCATION,
     });
     setCategories(cats);
     setCategoryId(null);
@@ -196,7 +207,7 @@ export const usePosSale = () => {
   }, []);
 
   const loadItems = useCallback(
-    async (loc: string, query?: string, silent = false) => {
+    async (query?: string, silent = false) => {
       if (!silent) {
         setItemsRefreshing(true);
       }
@@ -204,18 +215,24 @@ export const usePosSale = () => {
         if (query?.trim()) {
           const result = await salesService.searchItems(
             query.trim(),
-            loc || undefined,
+            POS_CATALOG_LOCATION,
           );
           setItems(result.items);
           syncBatchItemIds(result.items);
           if (result.parsed_qty && result.items.length === 1) {
-            return { autoQty: result.parsed_qty, item: result.items[0] };
+            const { displayItems: merged } = mergePosCatalogAcrossBranches(
+              result.items,
+              branchLocation,
+            );
+            const match = merged[0] ?? result.items[0];
+            return { autoQty: result.parsed_qty, item: match };
           }
           return null;
         }
 
         const result = await inventoryService.list({
           for_pos_sale: true,
+          location: POS_CATALOG_LOCATION,
         });
         setItems(result.items);
         syncBatchItemIds(result.items);
@@ -226,19 +243,16 @@ export const usePosSale = () => {
         }
       }
     },
-    [syncBatchItemIds],
+    [branchLocation, syncBatchItemIds],
   );
 
   const refreshItemsSilent = useCallback(async () => {
-    if (!branchLocation) {
-      return;
-    }
     try {
-      await loadItems(branchLocation, searchQuery.trim() || undefined, true);
+      await loadItems(searchQuery.trim() || undefined, true);
     } catch {
       /* keep last good data during background refresh */
     }
-  }, [branchLocation, loadItems, searchQuery]);
+  }, [loadItems, searchQuery]);
 
   const refreshContext = useCallback(async () => {
     setLoading(true);
@@ -252,8 +266,8 @@ export const usePosSale = () => {
       const loc = defaultLocation(ctx.filters.locations);
       setLocation(loc);
       setPaymentMethod(ctx.filters.payment_methods[0] ?? 'Cash');
-      await loadCategories(loc);
-      await loadItems(loc);
+      await loadCategories();
+      await loadItems();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load POS');
     } finally {
@@ -294,7 +308,7 @@ export const usePosSale = () => {
   });
 
   const selectLocation = useCallback(
-    async (loc: string) => {
+    (loc: string) => {
       setLocation(loc);
       setCart([]);
       setSearchQuery('');
@@ -302,14 +316,55 @@ export const usePosSale = () => {
         setCategoryId(categories[0].id);
       }
       setSubCategoryId('all');
-      try {
-        await loadCategories(loc);
-        await loadItems(loc);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to update branch');
-      }
     },
-    [categories, loadCategories, loadItems],
+    [categories],
+  );
+
+  const { displayItems: catalogItems } = useMemo(
+    () => mergePosCatalogAcrossBranches(items, branchLocation),
+    [items, branchLocation],
+  );
+
+  useEffect(() => {
+    for (const item of items) {
+      const key = itemNumberKey(item);
+      const list = variantsByItemNumberRef.current.get(key) ?? [];
+      const idx = list.findIndex(row => row.id === item.id);
+      if (idx >= 0) {
+        list[idx] = item;
+        variantsByItemNumberRef.current.set(key, [...list]);
+      } else {
+        variantsByItemNumberRef.current.set(key, [...list, item]);
+      }
+    }
+  }, [items]);
+
+  const catalogScopeLabel = useMemo(() => {
+    if (locations.length > 1) {
+      return `All branches (${locations.length})`;
+    }
+    return 'All locations';
+  }, [locations.length]);
+
+  const resolveSaleItem = useCallback(
+    (displayItem: InventoryItem) =>
+      resolveCartItemForSale(
+        displayItem,
+        variantsByItemNumberRef.current,
+        branchLocation,
+      ),
+    [branchLocation],
+  );
+
+  const prepareCheckout = useCallback(
+    (lines: CartLine[]) =>
+      prepareCheckoutCart(
+        lines,
+        variantsByItemNumberRef.current,
+        items,
+        branchLocation,
+      ),
+    [branchLocation, items],
   );
 
   const getCartQty = useCallback(
@@ -317,6 +372,18 @@ export const usePosSale = () => {
       cart
         .filter(line => line.item_id === itemId)
         .reduce((sum, line) => sum + line.qty, 0),
+    [cart],
+  );
+
+  const getDisplayCartQty = useCallback(
+    (displayItem: InventoryItem) => {
+      const ids = new Set(
+        variantIdsForDisplayItem(displayItem, variantsByItemNumberRef.current),
+      );
+      return cart
+        .filter(line => ids.has(line.item_id))
+        .reduce((sum, line) => sum + line.qty, 0);
+    },
     [cart],
   );
 
@@ -381,8 +448,8 @@ export const usePosSale = () => {
       if (!itemHasBatches(item) && isItemExpired(item)) {
         return { ok: false, message: `${item.description} is expired` };
       }
-      const stock = item.qty ?? 0;
-      const inCart = getCartQty(item.id);
+      const stock = itemSellableQty(item);
+      const inCart = isReturn ? getCartQty(item.id) : getDisplayCartQty(item);
       if (stock <= 0 && inCart === 0) {
         return { ok: false, message: `${item.description} is out of stock` };
       }
@@ -394,7 +461,7 @@ export const usePosSale = () => {
       }
       return { ok: true };
     },
-    [allowNegativeInventory, getCartLineQty, getMaxReturnQty, isReturn, returnSourceSale],
+    [allowNegativeInventory, getCartLineQty, getDisplayCartQty, getCartQty, getMaxReturnQty, isReturn, returnSourceSale],
   );
 
   const selectCustomer = useCallback((c: CustomerSummary | null) => {
@@ -456,7 +523,7 @@ export const usePosSale = () => {
       return rows;
     }
 
-    let rows = items;
+    let rows = catalogItems;
     if (categoryId != null) {
       const cat = categories.find(c => c.id === categoryId);
       if (cat) {
@@ -489,7 +556,7 @@ export const usePosSale = () => {
     }
     return rows;
   }, [
-    items,
+    catalogItems,
     categories,
     categoryId,
     subCategoryId,
@@ -521,6 +588,8 @@ export const usePosSale = () => {
                 ...line,
                 qty: nextQty,
                 line_total: round2(nextQty * line.unit_price),
+                inventory_location:
+                  item.location?.trim() || line.inventory_location || null,
               }
             : line,
         );
@@ -539,24 +608,11 @@ export const usePosSale = () => {
           item_batch_id: batchId,
           batch_number: batch?.batch_number ?? null,
           batch_expiry_date: batch?.expiry_date ?? null,
+          inventory_location: item.location?.trim() || null,
         },
       ];
     });
   }, []);
-
-  const tryAddToCart = useCallback(
-    (item: InventoryItem, qty = 1): boolean => {
-      const check = canSellItem(item, qty);
-      if (!check.ok) {
-        setError(check.message ?? 'Cannot add item');
-        return false;
-      }
-      const returnBatch = resolveReturnBatch(item);
-      addToCart(item, qty, returnBatch);
-      return true;
-    },
-    [addToCart, canSellItem, resolveReturnBatch],
-  );
 
   const removeFromCart = useCallback((itemId: number, itemBatchId?: number | null) => {
     if (itemBatchId === undefined) {
@@ -584,21 +640,33 @@ export const usePosSale = () => {
     setBatchPickerQty(1);
   }, []);
 
-  const openBatchPicker = useCallback(async (item: InventoryItem, qty = 1) => {
-    setBatchPickerItem(item);
+  const openBatchPicker = useCallback(async (displayItem: InventoryItem, qty = 1) => {
+    const saleItem = isReturn
+      ? displayItem
+      : resolveSaleItem(displayItem);
+    if (
+      !isReturn &&
+      isItemExpired(saleItem) &&
+      !itemHasBatches(saleItem) &&
+      !itemHasBatches(displayItem)
+    ) {
+      setError(`${displayItem.item_number} is expired`);
+      return;
+    }
+    setBatchPickerItem(saleItem);
     setBatchPickerOpen(true);
     setBatchPickerQty(qty);
     setBatchPickerBatches([]);
     setBatchPickerError(null);
     setBatchPickerLoading(true);
     try {
-      const { batches } = await inventoryService.getItemBatches(item.id);
+      const { batches } = await inventoryService.getItemBatches(saleItem.id);
       setBatchPickerBatches(batches);
       if (batches.length > 0) {
-        setBatchItemIds(prev => new Set(prev).add(item.id));
+        setBatchItemIds(prev => new Set(prev).add(saleItem.id));
         setItems(prev =>
           prev.map(row =>
-            row.id === item.id
+            row.id === saleItem.id
               ? { ...row, has_batches: true, batch_count: batches.length }
               : row,
           ),
@@ -611,7 +679,43 @@ export const usePosSale = () => {
     } finally {
       setBatchPickerLoading(false);
     }
-  }, []);
+  }, [isReturn, resolveSaleItem]);
+
+  const tryAddToCart = useCallback(
+    (displayItem: InventoryItem, qty = 1): boolean => {
+      if (isReturn) {
+        const check = canSellItem(displayItem, qty);
+        if (!check.ok) {
+          setError(check.message ?? 'Cannot add item');
+          return false;
+        }
+        const returnBatch = resolveReturnBatch(displayItem);
+        addToCart(displayItem, qty, returnBatch);
+        return true;
+      }
+
+      const saleItem = resolveSaleItem(displayItem);
+      if (saleItem.has_expired_stock || isItemExpired(saleItem)) {
+        if (itemHasBatches(saleItem) || itemHasBatches(displayItem)) {
+          void openBatchPicker(displayItem, qty);
+          return false;
+        }
+        setError(
+          `${saleItem.item_number} is expired at ${saleItem.location ?? 'this branch'}`,
+        );
+        return false;
+      }
+
+      const check = canSellItem(displayItem, qty);
+      if (!check.ok) {
+        setError(check.message ?? 'Cannot add item');
+        return false;
+      }
+      addToCart(saleItem, qty, null);
+      return true;
+    },
+    [addToCart, canSellItem, isReturn, openBatchPicker, resolveReturnBatch, resolveSaleItem],
+  );
 
   const addMainFromBatchPicker = useCallback(
     (qty: number) => {
@@ -645,14 +749,30 @@ export const usePosSale = () => {
 
   const toggleCartItem = useCallback(
     (item: InventoryItem): boolean => {
-      const inCart = getCartQty(item.id) > 0;
+      if (isReturn) {
+        const inCart = getCartQty(item.id) > 0;
+        if (inCart) {
+          removeFromCart(item.id);
+          return true;
+        }
+        return tryAddToCart(item, 1);
+      }
+
+      const variantIds = variantIdsForDisplayItem(item, variantsByItemNumberRef.current);
+      const inCart = getDisplayCartQty(item) > 0;
       if (inCart) {
-        removeFromCart(item.id);
+        setCart(prev => prev.filter(line => !variantIds.includes(line.item_id)));
         return true;
       }
       return tryAddToCart(item, 1);
     },
-    [getCartQty, removeFromCart, tryAddToCart],
+    [
+      getCartQty,
+      getDisplayCartQty,
+      isReturn,
+      removeFromCart,
+      tryAddToCart,
+    ],
   );
 
   const updateCartQty = useCallback(
@@ -710,7 +830,7 @@ export const usePosSale = () => {
 
         const item = items.find(i => i.id === itemId);
         if (item && !allowNegativeInventory && !isReturn) {
-          const stock = item.qty ?? 0;
+          const stock = item ? itemSellableQty(item) : 0;
           if (stock <= 0) {
             setError(`${item.description} is out of stock`);
             return prev;
@@ -729,6 +849,76 @@ export const usePosSale = () => {
       });
     },
     [allowNegativeInventory, getMaxReturnQty, isReturn, items],
+  );
+
+  const decrementDisplayCartQty = useCallback(
+    (displayItem: InventoryItem, itemBatchId?: number | null) => {
+      const variantIds = variantIdsForDisplayItem(displayItem, variantsByItemNumberRef.current);
+      setCart(prev => {
+        let batchId: number | null;
+        if (itemBatchId !== undefined) {
+          batchId = itemBatchId ?? null;
+        } else {
+          const mainLine = prev.find(
+            line =>
+              variantIds.includes(line.item_id) && line.item_batch_id == null,
+          );
+          const line =
+            mainLine ?? prev.find(cartLine => variantIds.includes(cartLine.item_id));
+          batchId = line?.item_batch_id ?? null;
+        }
+        const line = prev.find(
+          cartLine =>
+            variantIds.includes(cartLine.item_id) &&
+            (cartLine.item_batch_id ?? null) === batchId,
+        );
+        if (!line) {
+          return prev;
+        }
+        const nextQty = line.qty - 1;
+        if (nextQty <= 0) {
+          return prev.filter(
+            cartLine =>
+              !(
+                cartLine.item_id === line.item_id &&
+                (cartLine.item_batch_id ?? null) === batchId
+              ),
+          );
+        }
+        return prev.map(cartLine =>
+          cartLine.item_id === line.item_id &&
+          (cartLine.item_batch_id ?? null) === batchId
+            ? {
+                ...cartLine,
+                qty: nextQty,
+                line_total: round2(nextQty * cartLine.unit_price),
+              }
+            : cartLine,
+        );
+      });
+    },
+    [],
+  );
+
+  const removeDisplayFromCart = useCallback(
+    (displayItem: InventoryItem, itemBatchId?: number | null) => {
+      const variantIds = variantIdsForDisplayItem(displayItem, variantsByItemNumberRef.current);
+      if (itemBatchId === undefined) {
+        setCart(prev => prev.filter(line => !variantIds.includes(line.item_id)));
+        return;
+      }
+      const batchId = itemBatchId ?? null;
+      setCart(prev =>
+        prev.filter(
+          line =>
+            !(
+              variantIds.includes(line.item_id) &&
+              (line.item_batch_id ?? null) === batchId
+            ),
+        ),
+      );
+    },
+    [],
   );
 
   const decrementCartQty = useCallback(
@@ -777,16 +967,28 @@ export const usePosSale = () => {
     [],
   );
 
-  const cartHasStockIssues = useCallback((): boolean => {
-    if (isReturn || allowNegativeInventory) {
-      return false;
-    }
-    return cart.some(line => {
-      const item = items.find(i => i.id === line.item_id);
-      const stock = item?.qty ?? 0;
-      return !item || stock <= 0 || line.qty > stock;
-    });
-  }, [allowNegativeInventory, cart, isReturn, items]);
+  const cartHasStockIssuesFor = useCallback(
+    (lines: CartLine[]): boolean => {
+      if (isReturn || allowNegativeInventory) {
+        return false;
+      }
+      return lines.some(line => {
+        const item = resolveInventoryRowForCartLine(
+          line,
+          items,
+          variantsByItemNumberRef.current,
+        );
+        const stock = item ? itemSellableQty(item) : 0;
+        return !item || stock <= 0 || line.qty > stock;
+      });
+    },
+    [allowNegativeInventory, isReturn, items],
+  );
+
+  const cartHasStockIssues = useCallback(
+    (): boolean => cartHasStockIssuesFor(cart),
+    [cart, cartHasStockIssuesFor],
+  );
 
   useEffect(() => {
     if (allowNegativeInventory || items.length === 0) {
@@ -799,12 +1001,16 @@ export const usePosSale = () => {
       let removed = false;
       const next = prev
         .map(line => {
-          const item = items.find(i => i.id === line.item_id);
-          if (!item || (item.qty ?? 0) <= 0) {
+          const item = resolveInventoryRowForCartLine(
+            line,
+            items,
+            variantsByItemNumberRef.current,
+          );
+          if (!item || itemSellableQty(item) <= 0) {
             removed = true;
             return null;
           }
-          const stock = item.qty ?? 0;
+          const stock = itemSellableQty(item);
           if (line.qty > stock) {
             removed = true;
             return {
@@ -833,12 +1039,9 @@ export const usePosSale = () => {
       if (isReturn && returnSourceSale) {
         return;
       }
-      if (!branchLocation) {
-        return;
-      }
       if (query.trim() === '') {
         try {
-          await loadItems(branchLocation);
+          await loadItems();
         } catch (e) {
           setError(e instanceof Error ? e.message : 'Search failed');
         }
@@ -848,22 +1051,20 @@ export const usePosSale = () => {
         return;
       }
       try {
-        const auto = await loadItems(branchLocation, query);
+        const auto = await loadItems(query);
         if (auto?.item && auto.autoQty) {
-          const sellCheck = canSellItem(auto.item, auto.autoQty);
-          if (!sellCheck.ok) {
-            setError(sellCheck.message ?? 'Cannot sell item');
+          const ok = tryAddToCart(auto.item, auto.autoQty);
+          if (!ok) {
             return;
           }
-          addToCart(auto.item, auto.autoQty);
           setSearchQuery('');
-          await loadItems(branchLocation);
+          await loadItems();
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Search failed');
       }
     },
-    [addToCart, branchLocation, canSellItem, isReturn, loadItems, returnSourceSale],
+    [isReturn, loadItems, returnSourceSale, tryAddToCart],
   );
 
   const subTotal = useMemo(
@@ -1267,6 +1468,14 @@ export const usePosSale = () => {
         setCart(
           (sale.items ?? []).map(line => {
             const inv = items.find(i => i.id === line.item_id);
+            const key = itemNumberKey({
+              item_number: line.item_number,
+              id: line.item_id,
+            } as InventoryItem);
+            const variant =
+              variantsByItemNumberRef.current
+                .get(key)
+                ?.find(row => row.id === line.item_id) ?? inv;
             return {
               item_id: line.item_id,
               item_number: line.item_number,
@@ -1274,7 +1483,12 @@ export const usePosSale = () => {
               qty: line.qty,
               unit_price: line.unit_price,
               line_total: line.line_total,
-              uom: line.uom?.trim() || inv?.uom?.trim() || 'Pcs',
+              uom: line.uom?.trim() || variant?.uom?.trim() || 'Pcs',
+              item_batch_id: line.item_batch_id ?? null,
+              batch_number: line.batch_number ?? null,
+              batch_expiry_date: line.batch_expiry_date ?? null,
+              inventory_location:
+                variant?.location?.trim() || sale.location?.trim() || null,
             };
           }),
         );
@@ -1301,11 +1515,30 @@ export const usePosSale = () => {
   );
 
   const holdSale = useCallback(
-    async (notes?: string | null): Promise<{ receipt: SaleReceiptPayload; saleId: number } | null> => {
+    async (
+      notes?: string | null,
+      cartOverride?: CartLine[],
+    ): Promise<{ receipt: SaleReceiptPayload; saleId: number } | null> => {
       const activeCustomer = customer ?? WALK_IN;
       const isWalkIn = activeCustomer.id === 0;
+      const checkoutCart =
+        cartOverride && cartOverride.length > 0 ? cartOverride : cart;
+      const { location: stockLocation, lines: saleLines } =
+        prepareCheckout(checkoutCart);
+      const checkoutSubTotal = round2(
+        saleLines.reduce((sum, line) => sum + line.line_total, 0),
+      );
+      const checkoutDiscount = computeDiscountAmount(
+        checkoutSubTotal,
+        orderDiscountType,
+        orderDiscountInput,
+      );
+      let checkoutOfferDiscount = offerDiscount;
+      let checkoutNet = round2(
+        Math.max(0, checkoutSubTotal - checkoutDiscount - checkoutOfferDiscount),
+      );
 
-      if (cart.length === 0) {
+      if (checkoutCart.length === 0) {
         setError('Add at least one item to hold');
         return null;
       }
@@ -1317,7 +1550,11 @@ export const usePosSale = () => {
         setError('Select a branch');
         return null;
       }
-      if (discount > subTotal) {
+      if (cartHasStockIssuesFor(saleLines)) {
+        setError('Remove out-of-stock items from the cart before holding');
+        return null;
+      }
+      if (checkoutDiscount > checkoutSubTotal) {
         setError('Discount cannot exceed subtotal');
         return null;
       }
@@ -1330,33 +1567,49 @@ export const usePosSale = () => {
         setError('Enter promo code for the selected offer');
         return null;
       }
-      if (allowOffer && selectedOfferId != null && offerPreviewError) {
-        setError(offerPreviewError);
-        return null;
-      }
 
       setSubmitting(true);
       setError(null);
       try {
+        if (
+          allowOffer &&
+          selectedOfferId != null &&
+          cartOverride &&
+          cartOverride.length > 0
+        ) {
+          const preview = await offerService.preview({
+            offerId: selectedOfferId,
+            lines: saleLines,
+            promoCode: offerPromoCode,
+          });
+          checkoutOfferDiscount = preview.offer_discount;
+          checkoutNet = round2(
+            Math.max(0, checkoutSubTotal - checkoutDiscount - checkoutOfferDiscount),
+          );
+        } else if (allowOffer && selectedOfferId != null && offerPreviewError) {
+          setError(offerPreviewError);
+          return null;
+        }
+
         const salePayload = attachOfferToPayload({
           transaction_type: TRANSACTION_TYPE_SALE,
           sales_type: 'Retail',
           sales_id: salesId,
-          location: branchLocation,
+          location: stockLocation,
           customer_id: isWalkIn ? null : activeCustomer.id,
           customer_name: activeCustomer.customer_name,
-          sub_total: subTotal,
-          discount,
-          net_amount: netAmount,
+          sub_total: checkoutSubTotal,
+          discount: checkoutDiscount,
+          net_amount: checkoutNet,
           payment_method: 'Hold',
           amount_received: 0,
           notes: notes?.trim() || 'Held from mobile POS',
-          items: cart,
+          items: saleLines,
           order_status: 'hold',
         });
 
         const { sale, receipt } = await salesService.createSale(salePayload);
-        const holdReceipt = enrichReceipt(receipt, true, cart);
+        const holdReceipt = enrichReceipt(receipt, true, checkoutCart);
 
         setCart([]);
         setCustomer(WALK_IN);
@@ -1385,20 +1638,22 @@ export const usePosSale = () => {
       attachOfferToPayload,
       branchLocation,
       cart,
+      cartHasStockIssuesFor,
       clearHoldSession,
       customer,
-      discount,
       enrichReceipt,
-      netAmount,
       notifyRefresh,
+      offerDiscount,
       offerPreviewError,
       offerPromoCode,
+      orderDiscountInput,
+      orderDiscountType,
       refreshContext,
       resetDiscount,
+      prepareCheckout,
       salesId,
       selectedOffer,
       selectedOfferId,
-      subTotal,
     ],
   );
 
@@ -1408,16 +1663,32 @@ export const usePosSale = () => {
     ): Promise<{ receipt: SaleReceiptPayload; saleId: number } | null> => {
     const activeCustomer = customer ?? WALK_IN;
     const isWalkIn = activeCustomer.id === 0;
+    const checkoutCart =
+      payment.cart && payment.cart.length > 0 ? payment.cart : cart;
+    const { location: stockLocation, lines: saleLines } =
+      prepareCheckout(checkoutCart);
+    const checkoutSubTotal = round2(
+      saleLines.reduce((sum, line) => sum + line.line_total, 0),
+    );
+    const checkoutDiscount = computeDiscountAmount(
+      checkoutSubTotal,
+      orderDiscountType,
+      orderDiscountInput,
+    );
+    let checkoutOfferDiscount = offerDiscount;
+    let checkoutNet = round2(
+      Math.max(0, checkoutSubTotal - checkoutDiscount - checkoutOfferDiscount),
+    );
 
-    if (cart.length === 0) {
+    if (checkoutCart.length === 0) {
       setError('Add at least one item to the cart');
       return null;
     }
-    if (!isReturn && cartHasStockIssues()) {
+    if (!isReturn && cartHasStockIssuesFor(saleLines)) {
       setError('Remove out-of-stock items from the cart before payment');
       return null;
     }
-    if (discount > subTotal) {
+    if (checkoutDiscount > checkoutSubTotal) {
       setError('Discount cannot exceed subtotal');
       return null;
     }
@@ -1429,15 +1700,6 @@ export const usePosSale = () => {
       !offerPromoCode.trim()
     ) {
       setError('Enter promo code for the selected offer');
-      return null;
-    }
-    if (
-      !isReturn &&
-      allowOffer &&
-      selectedOfferId != null &&
-      offerPreviewError
-    ) {
-      setError(offerPreviewError);
       return null;
     }
     if (!activeHoldId && !salesId) {
@@ -1463,14 +1725,36 @@ export const usePosSale = () => {
       setError('Enter a transaction / approval ID for online payment');
       return null;
     }
-    if (!activeHoldId && !salesId) {
-      setError('Sale ID not ready — pull to refresh');
-      return null;
-    }
 
     setSubmitting(true);
     setError(null);
     try {
+      if (
+        !isReturn &&
+        allowOffer &&
+        selectedOfferId != null &&
+        payment.cart &&
+        payment.cart.length > 0
+      ) {
+        const preview = await offerService.preview({
+          offerId: selectedOfferId,
+          lines: saleLines,
+          promoCode: offerPromoCode,
+        });
+        checkoutOfferDiscount = preview.offer_discount;
+        checkoutNet = round2(
+          Math.max(0, checkoutSubTotal - checkoutDiscount - checkoutOfferDiscount),
+        );
+      } else if (
+        !isReturn &&
+        allowOffer &&
+        selectedOfferId != null &&
+        offerPreviewError
+      ) {
+        setError(offerPreviewError);
+        return null;
+      }
+
       const originalBill =
         payment.original_sale_id?.trim() ||
         returnSourceSale?.sales_id?.trim() ||
@@ -1489,18 +1773,18 @@ export const usePosSale = () => {
         transaction_type: isReturn ? TRANSACTION_TYPE_RETURN : TRANSACTION_TYPE_SALE,
         sales_type: isReturn ? 'Return' : 'Retail',
         sales_id: activeHoldSalesId ?? salesId,
-        location: branchLocation,
+        location: stockLocation,
         customer_id: isWalkIn ? null : activeCustomer.id,
         customer_name: activeCustomer.customer_name,
-        sub_total: subTotal,
-        discount,
-        net_amount: netAmount,
+        sub_total: checkoutSubTotal,
+        discount: checkoutDiscount,
+        net_amount: checkoutNet,
         payment_method: payment.payment_method,
         amount_received: payment.amount_received,
         bank_id: payment.bank_id,
         cheque_number: payment.cheque_number,
         notes,
-        items: cart,
+        items: saleLines,
         order_status: 'completed',
       });
 
@@ -1516,7 +1800,7 @@ export const usePosSale = () => {
         ? await salesService.completeHold(activeHoldId, salePayload)
         : await salesService.createSale(salePayload);
 
-      const finalReceipt = enrichReceipt(receipt, false, cart);
+      const finalReceipt = enrichReceipt(receipt, false, checkoutCart);
 
       setCart([]);
       setCustomer(WALK_IN);
@@ -1552,22 +1836,23 @@ export const usePosSale = () => {
       attachOfferToPayload,
       branchLocation,
       cart,
-      cartHasStockIssues,
+      cartHasStockIssuesFor,
       clearHoldSession,
       customer,
-      discount,
       enrichReceipt,
-      netAmount,
       notifyRefresh,
+      offerDiscount,
       offerPreviewError,
       offerPromoCode,
+      orderDiscountInput,
+      orderDiscountType,
       refreshContext,
       resetDiscount,
+      prepareCheckout,
       returnSourceSale,
       salesId,
       selectedOffer,
       selectedOfferId,
-      subTotal,
       isReturn,
     ],
   );
@@ -1702,11 +1987,8 @@ export const usePosSale = () => {
   }, [clearOffer]);
 
   const refreshProducts = useCallback(async () => {
-    if (!branchLocation) {
-      return;
-    }
-    await loadItems(branchLocation, searchQuery.trim() || undefined);
-  }, [branchLocation, loadItems, searchQuery]);
+    await loadItems(searchQuery.trim() || undefined);
+  }, [loadItems, searchQuery]);
 
   return {
     loading,
@@ -1728,6 +2010,7 @@ export const usePosSale = () => {
     subCategoryId,
     setSubCategoryId,
     displayItems,
+    catalogScopeLabel,
     items,
     searchQuery,
     runSearch,
@@ -1736,6 +2019,9 @@ export const usePosSale = () => {
     tryAddToCart,
     toggleCartItem,
     getCartQty,
+    getDisplayCartQty,
+    decrementDisplayCartQty,
+    removeDisplayFromCart,
     canSellItem,
     allowNegativeInventory,
     updateCartQty,
@@ -1755,6 +2041,8 @@ export const usePosSale = () => {
     getCartLineQty,
     cartLineKey,
     cartHasStockIssues,
+    cartHasStockIssuesFor,
+    prepareCheckout,
     paymentMethods,
     paymentMethod,
     setPaymentMethod,

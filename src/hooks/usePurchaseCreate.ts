@@ -14,6 +14,10 @@ import type { InventoryItem } from '@/types/sales';
 import type { SalePaymentDetails } from '@/types/sales';
 import type { PosMobileSettings } from '@/types/settings';
 import { buildPurchaseReceiptPayload } from '@/utils/purchaseReceipt';
+import {
+  POS_CATALOG_LOCATION,
+  mergePosCatalogAcrossBranches,
+} from '@/utils/posSaleCatalogMerge';
 
 export interface PurchaseCartLine {
   item_id: number;
@@ -111,7 +115,8 @@ export const usePurchaseCreate = () => {
   ]);
 
   const loadProducts = useCallback(async () => {
-    const inv = await inventoryService.list();
+    // 'all' — one catalog across every branch (Main + others), same as the sales screen
+    const inv = await inventoryService.list({ location: POS_CATALOG_LOCATION });
     setItems(inv.items);
     setLocations(inv.filters.locations);
     const loc =
@@ -144,15 +149,9 @@ export const usePurchaseCreate = () => {
 
       const sups =
         supsResult.status === 'fulfilled' ? supsResult.value : [];
-      const resolvedLocation =
-        invResult.status === 'fulfilled'
-          ? invResult.value.filters.locations.find(l => l === 'Main Location') ??
-            invResult.value.filters.locations[0] ??
-            'Main Location'
-          : 'Main Location';
       const categoryRequest = await Promise.allSettled([
         inventoryService.getCategories({
-          location: resolvedLocation,
+          location: POS_CATALOG_LOCATION,
         }),
       ]);
       const cats =
@@ -193,8 +192,16 @@ export const usePurchaseCreate = () => {
     scopes: ['inventory', 'purchases'],
   });
 
+  /** One card per item number; qty = total across every location. */
+  const mergedItems = useMemo(
+    () =>
+      mergePosCatalogAcrossBranches(items, location || 'Main Location')
+        .displayItems,
+    [items, location],
+  );
+
   const displayItems = useMemo(() => {
-    let rows = items;
+    let rows = mergedItems;
     if (categoryId != null) {
       const cat = categories.find(c => c.id === categoryId);
       if (cat) {
@@ -224,7 +231,7 @@ export const usePurchaseCreate = () => {
       );
     }
     return rows;
-  }, [items, categories, categoryId, subCategoryId, searchQuery]);
+  }, [mergedItems, categories, categoryId, subCategoryId, searchQuery]);
 
   const getCartQty = useCallback(
     (itemId: number) => cart.find(l => l.item_id === itemId)?.qty ?? 0,

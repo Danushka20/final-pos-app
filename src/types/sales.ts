@@ -97,6 +97,8 @@ export interface CartLine {
   item_batch_id?: number | null;
   batch_number?: string | null;
   batch_expiry_date?: string | null;
+  /** Branch inventory row used for stock deduction */
+  inventory_location?: string | null;
 }
 
 export interface SaleLineItem extends CartLine {
@@ -203,4 +205,6 @@ export interface SalePaymentDetails {
   refund_card_last4?: string | null;
   hold_pin?: string | null;
   original_sale_id?: string | null;
+  /** Committed cart lines (e.g. after manual qty entry on order screen). */
+  cart?: CartLine[];
 }

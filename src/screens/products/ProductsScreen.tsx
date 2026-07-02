@@ -7,7 +7,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Package, SlidersHorizontal, Truck } from 'lucide-react-native';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { AppHeader } from '@/components/common/AppHeader';
-import { FilterChips } from '@/components/common/FilterChips';
+import { PosCategoryBar } from '@/components/sales/PosCategoryBar';
 import { LoadingOverlay } from '@/components/common/LoadingOverlay';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
@@ -31,7 +31,8 @@ export const ProductsScreen: React.FC = () => {
     }
   }, [inv.error, showError]);
 
-  const categoryOptions = inv.categories.map(c => c.name);
+  const selectedCategoryId =
+    inv.categoryId === 'all' ? null : inv.categoryId;
 
   const renderItem = ({ item }: { item: InventoryItem }) => (
     <Pressable
@@ -53,7 +54,9 @@ export const ProductsScreen: React.FC = () => {
           <Text size="xs" color={colors.textMuted} mt="$0.5">
             ID {item.item_number || item.id}
             {item.sku ? ` · SKU ${item.sku}` : ''}
+            {item.product_type ? ` · ${item.product_type}` : ''}
             {item.category ? ` · ${item.category}` : ''}
+            {item.sub_category ? ` / ${item.sub_category}` : ''}
           </Text>
           <Text size="xs" color={colors.textMuted}>
             {item.location ?? '—'}
@@ -77,6 +80,27 @@ export const ProductsScreen: React.FC = () => {
         </VStack>
       </HStack>
     </Pressable>
+  );
+
+  const listHeader = (
+    <Box px="$4" pb="$2" gap="$2" pt="$1">
+      {inv.categories.length > 0 ? (
+        <PosCategoryBar
+          categories={inv.categories}
+          selectedCategoryId={selectedCategoryId}
+          selectedSubCategoryId={inv.subCategoryId}
+          onSelectCategory={id => inv.setCategoryId(id ?? 'all')}
+          onSelectSubCategory={inv.setSubCategoryId}
+        />
+      ) : null}
+      <TextInput
+        placeholder="Search inventory…"
+        value={inv.search}
+        onChangeText={inv.setSearch}
+        style={appInputStyle}
+        placeholderTextColor={appInputPlaceholderColor}
+      />
+    </Box>
   );
 
   return (
@@ -103,53 +127,12 @@ export const ProductsScreen: React.FC = () => {
 
       {inv.loading ? <LoadingOverlay message="Loading inventory…" /> : null}
 
-      <Box px="$4" pb="$2" gap="$2">
-        <FilterChips
-          label="Branch / Area"
-          options={inv.filters.locations}
-          selected={inv.location}
-          onSelect={inv.setLocation}
-        />
-        <FilterChips
-          label="Product type"
-          options={inv.filters.product_types}
-          selected={inv.productType}
-          onSelect={inv.setProductType}
-        />
-        {categoryOptions.length > 0 ? (
-          <FilterChips
-            label="Category"
-            options={categoryOptions}
-            selected={
-              inv.categoryId === 'all'
-                ? 'all'
-                : (inv.categories.find(c => c.id === inv.categoryId)?.name ??
-                  'all')
-            }
-            onSelect={name => {
-              if (name === 'all') {
-                inv.setCategoryId('all');
-              } else {
-                const cat = inv.categories.find(c => c.name === name);
-                inv.setCategoryId(cat?.id ?? 'all');
-              }
-            }}
-          />
-        ) : null}
-        <TextInput
-          placeholder="Search inventory…"
-          value={inv.search}
-          onChangeText={inv.setSearch}
-          style={appInputStyle}
-          placeholderTextColor={appInputPlaceholderColor}
-        />
-      </Box>
-
       <SmoothFlatList
         data={inv.items}
         keyExtractor={item => String(item.id)}
         renderItem={renderItem}
-        contentContainerStyle={{ paddingBottom: TAB_BAR_SCROLL_PADDING, paddingTop: 8 }}
+        ListHeaderComponent={listHeader}
+        contentContainerStyle={{ paddingBottom: TAB_BAR_SCROLL_PADDING, paddingTop: 4 }}
         refreshControl={
           <RefreshControl refreshing={inv.loading} onRefresh={inv.refresh} />
         }

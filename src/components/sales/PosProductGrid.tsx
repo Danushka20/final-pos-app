@@ -13,6 +13,7 @@ interface PosProductGridProps {
   refreshing: boolean;
   onRefresh: () => void;
   onAddItem: (item: InventoryItem) => void;
+  onOpenOrder?: (item: InventoryItem) => void;
   onIncrementItem?: (item: InventoryItem) => void;
   onRemoveItem: (item: InventoryItem) => void;
   onRemoveAll?: (item: InventoryItem) => void;
@@ -28,10 +29,10 @@ interface PosProductGridProps {
   cartRevision?: string;
 }
 
-/** 3 columns = larger touch boxes on phone */
-const NUM_COLUMNS = 3;
-const GRID_H_PAD = 6;
-const BOX_GAP = 4;
+/** 2 columns — modern menu-style product cards */
+const NUM_COLUMNS = 2;
+const GRID_H_PAD = 8;
+const BOX_GAP = 6;
 
 export const PosProductGrid: React.FC<PosProductGridProps> = ({
   items,
@@ -39,6 +40,7 @@ export const PosProductGrid: React.FC<PosProductGridProps> = ({
   refreshing,
   onRefresh,
   onAddItem,
+  onOpenOrder,
   onIncrementItem,
   onRemoveItem,
   onRemoveAll,
@@ -66,10 +68,10 @@ export const PosProductGrid: React.FC<PosProductGridProps> = ({
       numColumns={NUM_COLUMNS}
       contentContainerStyle={{
         paddingHorizontal: GRID_H_PAD,
-        paddingTop: 6,
+        paddingTop: 4,
         paddingBottom: bottomInset,
       }}
-      columnWrapperStyle={{ justifyContent: 'flex-start' }}
+      columnWrapperStyle={{ gap: BOX_GAP, justifyContent: 'space-between' }}
       keyboardShouldPersistTaps="handled"
       refreshControl={
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
@@ -94,6 +96,7 @@ export const PosProductGrid: React.FC<PosProductGridProps> = ({
             onOpenBatches={onOpenBatches}
             disabled={canSellItem ? !canSellItem(item) : false}
             onAdd={onAddItem}
+            onOpenOrder={onOpenOrder}
             onIncrement={onIncrementItem}
             onRemove={onRemoveItem}
             onRemoveAll={onRemoveAll}
