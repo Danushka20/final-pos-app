@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import { Box, HStack, Text, VStack } from '@gluestack-ui/themed';
 import { SmoothFlatList } from '@/components/common/SmoothFlatList';
-import { Mail, Phone, Pencil, Plus, Trash2, User } from 'lucide-react-native';
+import { Mail, Phone, Pencil, Plus, Trash2, User, Wallet } from 'lucide-react-native';
 import { ScreenContainer } from '@/components/common/ScreenContainer';
 import { AppHeader } from '@/components/common/AppHeader';
 import { LoadingOverlay } from '@/components/common/LoadingOverlay';
@@ -152,6 +152,23 @@ export const CustomersScreen: React.FC = () => {
         </HStack>
 
         <HStack gap="$2" mt="$3" justifyContent="flex-end">
+          {(item.net_balance ?? 0) > 0 ? (
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.receiveBtn]}
+              onPress={() =>
+                navigation.navigate('CustomerReceivePayment', {
+                  customerId: item.id,
+                })
+              }
+              disabled={busy || deletingId != null}
+              accessibilityRole="button"
+              accessibilityLabel={`Receive payment from ${item.customer_name}`}>
+              <Wallet size={16} color={colors.success} />
+              <Text size="sm" fontWeight="$semibold" color={colors.success}>
+                Receive
+              </Text>
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity
             style={styles.actionBtn}
             onPress={() => handleEdit(item)}
@@ -225,13 +242,28 @@ export const CustomersScreen: React.FC = () => {
             borderColor={colors.borderLight}
             style={shadows.card}>
             <Text size="xs" color={colors.textMuted}>
-              Receivables
+              Credit debtors
             </Text>
-            <Text fontSize="$lg" fontWeight="$bold" color={colors.error} mt="$0.5">
-              {formatCurrency(summary.total_receivables, currency)}
+            <Text fontSize="$lg" fontWeight="$bold" color={colors.warning} mt="$0.5">
+              {formatNumber(summary.debtor_count)}
             </Text>
           </Box>
         </HStack>
+
+        <Box
+          bg={colors.white}
+          borderRadius="$xl"
+          p="$3"
+          borderWidth={1}
+          borderColor={colors.borderLight}
+          style={shadows.card}>
+          <Text size="xs" color={colors.textMuted}>
+            Total receivables
+          </Text>
+          <Text fontSize="$lg" fontWeight="$bold" color={colors.error} mt="$0.5">
+            {formatCurrency(summary.total_receivables, currency)}
+          </Text>
+        </Box>
 
         <TextInput
           value={search}
@@ -295,5 +327,9 @@ const styles = StyleSheet.create({
   deleteBtn: {
     borderColor: colors.error,
     backgroundColor: '#FEF2F2',
+  },
+  receiveBtn: {
+    borderColor: colors.success,
+    backgroundColor: '#F0FDF4',
   },
 });

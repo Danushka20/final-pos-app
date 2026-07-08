@@ -35,7 +35,9 @@ import { formatCurrency } from '@/utils/format';
 import { cartLineKey, itemHasBatches } from '@/utils/batchUtils';
 import {
   buildPaymentNotes,
+  isCreditPayment,
   isOnlinePayment,
+  isWalkInCustomer,
   needsBank,
   needsPaymentReference,
 } from '@/utils/paymentMethod';
@@ -54,6 +56,18 @@ type Nav = NativeStackNavigationProp<SalesStackParamList, 'SaleOrder'>;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 const parseDraftQty = (raw: string | undefined): number | null => {
+  if (raw == null) {
+    return null;
+  }
+  const trimmed = raw.trim().replace(/,/g, '');
+  if (!trimmed || trimmed === '.') {
+    return null;
+  }
+  const parsed = parseFloat(trimmed);
+  return Number.isNaN(parsed) ? null : parsed;
+};
+
+const parseDraftPrice = (raw: string | undefined): number | null => {
   if (raw == null) {
     return null;
   }
@@ -92,6 +106,7 @@ export const SaleOrderScreen: React.FC = () => {
   const [discountMode, setDiscountMode] = useState<'percent' | 'amount'>('percent');
   const [holding, setHolding] = useState(false);
   const [qtyDrafts, setQtyDrafts] = useState<Record<string, string>>({});
+  const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({});
 
   const productOffers = useMemo(
     () => pos.applicableOffers.filter(o => o.discount_type === 'product'),
@@ -126,9 +141,22 @@ export const SaleOrderScreen: React.FC = () => {
     [qtyDrafts],
   );
 
+  const getEffectiveUnitPrice = useCallback(
+    (line: CartLine): number => {
+      const key = cartLineKey(line.item_id, line.item_batch_id);
+      const parsed = parseDraftPrice(priceDrafts[key]);
+      if (parsed !== null && parsed >= 0) {
+        return parsed;
+      }
+      return line.unit_price;
+    },
+    [priceDrafts],
+  );
+
   const getLineTotalPreview = useCallback(
-    (line: CartLine): number => round2(getEffectiveQty(line) * line.unit_price),
-    [getEffectiveQty],
+    (line: CartLine): number =>
+      round2(getEffectiveQty(line) * getEffectiveUnitPrice(line)),
+    [getEffectiveQty, getEffectiveUnitPrice],
   );
 
   const previewSubTotal = useMemo(
@@ -149,13 +177,15 @@ export const SaleOrderScreen: React.FC = () => {
       const key = cartLineKey(line.item_id, line.item_batch_id);
       const parsed = parseDraftQty(qtyDrafts[key]);
       const qty = parsed !== null && parsed > 0 ? parsed : line.qty;
+      const unitPrice = getEffectiveUnitPrice(line);
       return {
         ...line,
         qty,
-        line_total: round2(qty * line.unit_price),
+        unit_price: unitPrice,
+        line_total: round2(qty * unitPrice),
       };
     });
-  }, [pos.cart, qtyDrafts]);
+  }, [getEffectiveUnitPrice, pos.cart, qtyDrafts]);
 
   useEffect(() => {
     if (pos.activeHoldId) {
@@ -215,6 +245,22 @@ export const SaleOrderScreen: React.FC = () => {
           draft != null && parsed !== null && parsed === line.qty
             ? draft
             : String(line.qty);
+      }
+      return next;
+    });
+  }, [pos.cart]);
+
+  useEffect(() => {
+    setPriceDrafts(prev => {
+      const next: Record<string, string> = {};
+      for (const line of pos.cart) {
+        const key = cartLineKey(line.item_id, line.item_batch_id);
+        const draft = prev[key];
+        const parsed = parseDraftPrice(draft);
+        next[key] =
+          draft != null && parsed !== null && parsed === line.unit_price
+            ? draft
+            : String(line.unit_price);
       }
       return next;
     });
@@ -290,13 +336,24 @@ export const SaleOrderScreen: React.FC = () => {
 
   const customerOptions = [
     { id: 'walk-in', label: 'Walk-in Customer', subtitle: 'Default' },
-    ...pos.customers.map(c => ({
-      id: String(c.id),
-      label: c.customer_name,
-      subtitle: [c.customer_code ?? c.customer_id, c.contact_no, c.location]
-        .filter(Boolean)
-        .join(' · '),
-    })),
+    ...pos.customers.map(c => {
+      const balance =
+        (c.net_balance ?? 0) > 0
+          ? `Balance ${formatCurrency(c.net_balance, currency)}`
+          : null;
+      return {
+        id: String(c.id),
+        label: c.customer_name,
+        subtitle: [
+          c.customer_code ?? c.customer_id,
+          c.contact_no,
+          c.location,
+          balance,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+      };
+    }),
   ];
 
   const commitLineQty = useCallback(
@@ -320,12 +377,41 @@ export const SaleOrderScreen: React.FC = () => {
     [pos],
   );
 
+  const commitLinePrice = useCallback(
+    (line: CartLine, raw: string) => {
+      const key = cartLineKey(line.item_id, line.item_batch_id);
+      const trimmed = raw.trim();
+      if (!trimmed) {
+        setPriceDrafts(prev => ({
+          ...prev,
+          [key]: String(line.unit_price),
+        }));
+        return;
+      }
+      const parsed = parseDraftPrice(trimmed);
+      const price = parsed !== null ? Math.max(0, parsed) : line.unit_price;
+      pos.updateCartUnitPrice(line.item_id, price, line.item_batch_id ?? null);
+      setPriceDrafts(prev => ({ ...prev, [key]: String(price) }));
+    },
+    [pos],
+  );
+
   const commitAllQtyDrafts = useCallback(() => {
     for (const line of pos.cart) {
       const key = cartLineKey(line.item_id, line.item_batch_id);
       commitLineQty(line, qtyDrafts[key] ?? String(line.qty));
     }
   }, [commitLineQty, pos.cart, qtyDrafts]);
+
+  const commitAllPriceDrafts = useCallback(() => {
+    if (!pos.allowEditSellingPrice || pos.isReturn) {
+      return;
+    }
+    for (const line of pos.cart) {
+      const key = cartLineKey(line.item_id, line.item_batch_id);
+      commitLinePrice(line, priceDrafts[key] ?? String(line.unit_price));
+    }
+  }, [commitLinePrice, pos.allowEditSellingPrice, pos.cart, pos.isReturn, priceDrafts]);
 
   const applyDiscountDraft = useCallback(() => {
     const parsed = parseFloat(discountDraft.replace(/,/g, '')) || 0;
@@ -412,6 +498,7 @@ export const SaleOrderScreen: React.FC = () => {
     applyDiscountDraft();
     const checkoutCart = buildCheckoutCart();
     commitAllQtyDrafts();
+    commitAllPriceDrafts();
 
     if (!pos.isReturn && pos.cartHasStockIssuesFor(pos.prepareCheckout(checkoutCart).lines)) {
       showError({
@@ -430,6 +517,15 @@ export const SaleOrderScreen: React.FC = () => {
       showError({
         title: 'Refund card',
         message: 'Enter credit card last 4 digits once. They will be saved for future returns.',
+        variant: 'warning',
+      });
+      return;
+    }
+
+    if (!pos.isReturn && isCreditPayment(paymentMethod) && isWalkInCustomer(pos.customer)) {
+      showError({
+        title: 'Credit sale',
+        message: 'Select a registered customer to charge this sale to their account.',
         variant: 'warning',
       });
       return;
@@ -523,6 +619,7 @@ export const SaleOrderScreen: React.FC = () => {
     applyDiscountDraft();
     const checkoutCart = buildCheckoutCart();
     commitAllQtyDrafts();
+    commitAllPriceDrafts();
 
     if (pos.cartHasStockIssuesFor(pos.prepareCheckout(checkoutCart).lines)) {
       showError({
@@ -708,6 +805,8 @@ export const SaleOrderScreen: React.FC = () => {
                   item={item}
                   currency={currency}
                   qtyDraft={qtyDrafts[lineKey] ?? String(line.qty)}
+                  priceDraft={priceDrafts[lineKey] ?? String(line.unit_price)}
+                  allowEditPrice={pos.allowEditSellingPrice}
                   lineTotal={lineTotalPreview}
                   offerDiscount={offerLineDiscount}
                   isReturn={pos.isReturn}
@@ -721,6 +820,12 @@ export const SaleOrderScreen: React.FC = () => {
                   }}
                   onCommitQty={() =>
                     commitLineQty(line, qtyDrafts[lineKey] ?? String(line.qty))
+                  }
+                  onPriceDraftChange={text =>
+                    setPriceDrafts(prev => ({ ...prev, [lineKey]: text }))
+                  }
+                  onCommitPrice={() =>
+                    commitLinePrice(line, priceDrafts[lineKey] ?? String(line.unit_price))
                   }
                   onDecrement={() =>
                     pos.decrementCartQty(line.item_id, line.item_batch_id ?? null)
@@ -971,6 +1076,7 @@ export const SaleOrderScreen: React.FC = () => {
             onPaymentReferenceChange={setPaymentReference}
             paymentCardLast4={paymentCardLast4}
             onPaymentCardLast4Change={setPaymentCardLast4}
+            customer={pos.customer}
           />
         </SmoothScrollView>
 

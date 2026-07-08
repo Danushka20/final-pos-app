@@ -1,6 +1,10 @@
 import { apiClient } from '@/services/api/client';
 import type { ApiSuccessResponse } from '@/types/auth';
-import type { CustomerPayload } from '@/types/customers';
+import type {
+  CustomerPayload,
+  ReceivePaymentPayload,
+  ReceivePaymentResult,
+} from '@/types/customers';
 import type { CustomerSummary } from '@/types/sales';
 import type { CustomerListResult } from '@/types/customers';
 
@@ -23,11 +27,24 @@ export const customerService = {
       throw new Error(data.message ?? 'Failed to load customers');
     }
 
+    const customers = (data.data ?? []).map(normalizeCustomer);
+    const summary = data.summary ?? {
+      total_customers: customers.length,
+      debtor_count: customers.filter(c => (c.net_balance ?? 0) > 0).length,
+      total_receivables: customers.reduce(
+        (sum, c) => sum + Math.max(0, c.net_balance ?? 0),
+        0,
+      ),
+    };
+
     return {
-      customers: (data.data ?? []).map(normalizeCustomer),
-      summary: data.summary ?? {
-        total_customers: data.data?.length ?? 0,
-        total_receivables: 0,
+      customers,
+      summary: {
+        total_customers: summary.total_customers ?? customers.length,
+        debtor_count:
+          summary.debtor_count ??
+          customers.filter(c => (c.net_balance ?? 0) > 0).length,
+        total_receivables: summary.total_receivables ?? 0,
       },
       filters: data.filters ?? { locations: [] },
     };
@@ -66,6 +83,23 @@ export const customerService = {
       throw new Error(data.message ?? 'Failed to update customer');
     }
     return normalizeCustomer(data.data);
+  },
+
+  async receivePayment(
+    id: number,
+    payload: ReceivePaymentPayload,
+  ): Promise<ReceivePaymentResult> {
+    const { data } = await apiClient.post<ApiSuccessResponse<ReceivePaymentResult>>(
+      `/customers/${id}/receive-payment`,
+      payload,
+    );
+    if (!data.success || !data.data) {
+      throw new Error(data.message ?? 'Failed to record payment');
+    }
+    return {
+      ...data.data,
+      customer: normalizeCustomer(data.data.customer),
+    };
   },
 
   async remove(id: number): Promise<void> {

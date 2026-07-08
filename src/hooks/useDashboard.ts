@@ -101,6 +101,8 @@ export const useDashboard = () => {
     products: formatNumber(metrics?.active_items),
     lowStock: formatNumber(metrics?.low_stock_count),
     customers: formatNumber(metrics?.customers_count),
+    debtors: formatNumber(metrics?.debtor_count ?? 0),
+    receivables: formatCurrency(metrics?.total_receivables ?? 0, currency),
     holdOrders: formatNumber(metrics?.hold_orders_count),
     todayPurchases: formatCurrency(metrics?.today_purchases_amount, currency),
     todayExpenses: formatCurrency(metrics?.today_expenses_amount, currency),

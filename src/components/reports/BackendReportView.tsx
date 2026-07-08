@@ -135,6 +135,9 @@ export const BackendReportView: React.FC<BackendReportViewProps> = ({
         {report.filters.date_from} — {report.filters.date_to}
       </Text>
       <Text style={styles.mutedCenter}>{report.filters.branch_name}</Text>
+      {report.filters.item_name ? (
+        <Text style={styles.mutedCenter}>Item: {report.filters.item_name}</Text>
+      ) : null}
       {report.generated_at ? (
         <Text style={styles.mutedCenter}>
           Generated:{' '}

@@ -70,6 +70,8 @@ export const DashboardScreen: React.FC = () => {
     products,
     lowStock,
     customers,
+    debtors,
+    receivables,
     holdOrders,
     todayExpenses,
     todayPurchases,
@@ -226,9 +228,30 @@ export const DashboardScreen: React.FC = () => {
                 compact
                 title="Customers"
                 value={customers}
-                subtitle="Registered"
+                subtitle={
+                  debtors !== '0'
+                    ? `${debtors} credit debtor${debtors === '1' ? '' : 's'}`
+                    : 'Registered'
+                }
                 icon={Users}
                 accentColor={colors.chartCustomers}
+                onPress={() => navigation.navigate('CustomersList')}
+              />
+            </View>
+            <View style={styles.metricHalf}>
+              <StatCard
+                fullWidth
+                compact
+                title="Receivables"
+                value={receivables}
+                subtitle={
+                  debtors !== '0'
+                    ? `${debtors} customer${debtors === '1' ? '' : 's'} owe`
+                    : 'Outstanding credit'
+                }
+                icon={Wallet}
+                variant="pink"
+                subtitleColor={debtors !== '0' ? colors.warning : colors.textMuted}
                 onPress={() => navigation.navigate('CustomersList')}
               />
             </View>

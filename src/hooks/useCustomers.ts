@@ -6,6 +6,7 @@ import type { CustomerSummary } from '@/types/sales';
 
 const defaultSummary = (): CustomerListSummary => ({
   total_customers: 0,
+  debtor_count: 0,
   total_receivables: 0,
 });
 

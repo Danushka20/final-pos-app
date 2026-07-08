@@ -20,6 +20,8 @@ interface SaleOrderLineRowProps {
   item?: InventoryItem;
   currency?: string;
   qtyDraft: string;
+  priceDraft?: string;
+  allowEditPrice?: boolean;
   lineTotal: number;
   offerDiscount: number;
   isReturn: boolean;
@@ -29,6 +31,8 @@ interface SaleOrderLineRowProps {
   showBatchInfo?: boolean;
   onQtyDraftChange: (text: string) => void;
   onCommitQty: () => void;
+  onPriceDraftChange?: (text: string) => void;
+  onCommitPrice?: () => void;
   onDecrement: () => void;
   onIncrement: () => void;
   onRemove: () => void;
@@ -39,6 +43,8 @@ export const SaleOrderLineRow: React.FC<SaleOrderLineRowProps> = ({
   item,
   currency,
   qtyDraft,
+  priceDraft,
+  allowEditPrice = false,
   lineTotal,
   offerDiscount,
   isReturn,
@@ -48,6 +54,8 @@ export const SaleOrderLineRow: React.FC<SaleOrderLineRowProps> = ({
   showBatchInfo = false,
   onQtyDraftChange,
   onCommitQty,
+  onPriceDraftChange,
+  onCommitPrice,
   onDecrement,
   onIncrement,
   onRemove,
@@ -62,6 +70,7 @@ export const SaleOrderLineRow: React.FC<SaleOrderLineRowProps> = ({
   const imageUri = localImage;
   const hasOffer = offerDiscount > 0;
   const unitPriceLabel = formatPricePerUom(formatCurrency(line.unit_price, currency), uom);
+  const canEditPrice = allowEditPrice && !isReturn;
 
   return (
     <View
@@ -122,7 +131,24 @@ export const SaleOrderLineRow: React.FC<SaleOrderLineRowProps> = ({
         </View>
 
         <View style={styles.priceCol}>
-          <Text style={styles.unitPrice}>{unitPriceLabel}</Text>
+          {canEditPrice ? (
+            <TextInput
+              value={priceDraft ?? String(line.unit_price)}
+              onChangeText={text =>
+                onPriceDraftChange?.(text.replace(/[^0-9.,]/g, ''))
+              }
+              onBlur={() => onCommitPrice?.()}
+              onSubmitEditing={() => onCommitPrice?.()}
+              keyboardType="decimal-pad"
+              returnKeyType="done"
+              selectTextOnFocus
+              style={styles.priceInput}
+              placeholder="0.00"
+              placeholderTextColor={appInputPlaceholderColor}
+            />
+          ) : (
+            <Text style={styles.unitPrice}>{unitPriceLabel}</Text>
+          )}
           <Text style={[styles.lineTotal, hasOffer && styles.lineTotalOffer]}>
             {formatCurrency(lineTotal, currency)}
           </Text>
@@ -275,6 +301,17 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.textSecondary,
     textAlign: 'right',
+  },
+  priceInput: {
+    ...appInputStyle,
+    width: 88,
+    minHeight: 34,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    textAlign: 'right',
+    fontWeight: '700',
+    fontSize: 13,
+    marginBottom: 0,
   },
   lineTotal: {
     ...typography.body,

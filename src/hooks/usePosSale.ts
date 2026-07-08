@@ -45,6 +45,7 @@ import {
 } from '@/utils/batchUtils';
 import { isItemExpired } from '@/utils/expiryUtils';
 import { itemSellableQty } from '@/utils/itemInventoryUtils';
+import { isCreditPayment } from '@/utils/paymentMethod';
 import {
   mergePosCatalogAcrossBranches,
   itemNumberKey,
@@ -151,6 +152,11 @@ export const usePosSale = () => {
   const allowOrderDiscount = useMemo(() => {
     const settings = context?.order_settings as { allow_order_discount?: boolean } | undefined;
     return settings?.allow_order_discount !== false;
+  }, [context?.order_settings]);
+
+  const allowEditSellingPrice = useMemo(() => {
+    const settings = context?.order_settings as { allow_edit_selling_price?: boolean } | undefined;
+    return settings?.allow_edit_selling_price !== false;
   }, [context?.order_settings]);
 
   const allowOffer = useMemo(() => {
@@ -849,6 +855,21 @@ export const usePosSale = () => {
       });
     },
     [allowNegativeInventory, getMaxReturnQty, isReturn, items],
+  );
+
+  const updateCartUnitPrice = useCallback(
+    (itemId: number, unitPrice: number, itemBatchId?: number | null) => {
+      const price = round2(Math.max(0, unitPrice));
+      const batchId = itemBatchId ?? null;
+      setCart(prev =>
+        prev.map(line =>
+          line.item_id === itemId && (line.item_batch_id ?? null) === batchId
+            ? { ...line, unit_price: price, line_total: round2(line.qty * price) }
+            : line,
+        ),
+      );
+    },
+    [],
   );
 
   const decrementDisplayCartQty = useCallback(
@@ -1725,6 +1746,10 @@ export const usePosSale = () => {
       setError('Enter a transaction / approval ID for online payment');
       return null;
     }
+    if (!isReturn && isCreditPayment(payment.payment_method) && isWalkIn) {
+      setError('Select a customer for credit sales so the balance can be tracked');
+      return null;
+    }
 
     setSubmitting(true);
     setError(null);
@@ -2024,7 +2049,9 @@ export const usePosSale = () => {
     removeDisplayFromCart,
     canSellItem,
     allowNegativeInventory,
+    allowEditSellingPrice,
     updateCartQty,
+    updateCartUnitPrice,
     decrementCartQty,
     removeFromCart,
     batchPickerOpen,

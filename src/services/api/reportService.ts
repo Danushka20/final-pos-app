@@ -22,6 +22,7 @@ export const reportService = {
             params.location && params.location !== 'all' ? params.location : undefined,
           branch_id:
             params.branchId && params.branchId !== 'all' ? params.branchId : undefined,
+          item_id: params.itemId ?? undefined,
         },
       },
     );

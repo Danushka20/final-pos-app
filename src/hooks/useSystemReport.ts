@@ -5,15 +5,16 @@ import { usePosSettings } from '@/context/PosSettingsContext';
 import { dashboardService } from '@/services/api/dashboardService';
 import { reportService } from '@/services/api/reportService';
 import { buildSystemReport } from '@/utils/systemReportBuilder';
-import { defaultReportDateRange } from '@/utils/reportDateFilters';
 import type { BackendReportData } from '@/types/backendReports';
+import type { ReportFilterParams } from '@/types/reportFilters';
 import type { SystemReportPayload, SystemReportType } from '@/types/reports';
+import { formatReportDateRangeLabel } from '@/utils/reportDateFilters';
 
 export type ReportLoadResult =
   | { source: 'dashboard'; report: SystemReportPayload }
   | { source: 'backend'; report: BackendReportData };
 
-export const useSystemReport = (type: SystemReportType) => {
+export const useSystemReport = (type: SystemReportType, filters: ReportFilterParams) => {
   const { settings } = usePosSettings();
   const [result, setResult] = useState<ReportLoadResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -35,16 +36,18 @@ export const useSystemReport = (type: SystemReportType) => {
             dashboardService.getOverview(),
             dashboardService.getTodayTables(),
           ]);
+          const report = buildSystemReport(type, overview, today, settings);
+          report.subtitle = formatReportDateRangeLabel(filters.dateFrom, filters.dateTo);
           setResult({
             source: 'dashboard',
-            report: buildSystemReport(type, overview, today, settings),
+            report,
           });
         } else {
           const backendKey = getReportBackendKey(type);
-          const { dateFrom, dateTo } = defaultReportDateRange();
           const report = await reportService.fetch(backendKey, {
-            dateFrom,
-            dateTo,
+            dateFrom: filters.dateFrom,
+            dateTo: filters.dateTo,
+            itemId: filters.itemId,
           });
           setResult({ source: 'backend', report });
         }
@@ -56,7 +59,7 @@ export const useSystemReport = (type: SystemReportType) => {
         setRefreshing(false);
       }
     },
-    [settings, type],
+    [filters.dateFrom, filters.dateTo, filters.itemId, settings, type],
   );
 
   useEffect(() => {

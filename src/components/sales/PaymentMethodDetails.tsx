@@ -6,11 +6,14 @@ import type { BankAccount } from '@/services/api/bankService';
 import {
   acceptsCardLast4,
   isCashPayment,
+  isCreditPayment,
   isOnlinePayment,
+  isWalkInCustomer,
   locksAmountReceived,
   needsBank,
 } from '@/utils/paymentMethod';
 import { formatCurrency, getCurrencyLabel } from '@/utils/format';
+import type { CustomerSummary } from '@/types/sales';
 import { colors, appInputStyle, typography } from '@/theme';
 
 interface PaymentMethodDetailsProps {
@@ -29,6 +32,7 @@ interface PaymentMethodDetailsProps {
   onPaymentReferenceChange: (v: string) => void;
   paymentCardLast4: string;
   onPaymentCardLast4Change: (v: string) => void;
+  customer?: CustomerSummary | null;
 }
 
 export const PaymentMethodDetails: React.FC<PaymentMethodDetailsProps> = ({
@@ -47,6 +51,7 @@ export const PaymentMethodDetails: React.FC<PaymentMethodDetailsProps> = ({
   onPaymentReferenceChange,
   paymentCardLast4,
   onPaymentCardLast4Change,
+  customer,
 }) => {
   useEffect(() => {
     if (locksAmountReceived(paymentMethod)) {
@@ -58,6 +63,15 @@ export const PaymentMethodDetails: React.FC<PaymentMethodDetailsProps> = ({
   const changeDue =
     !isReturn && isCashPayment(paymentMethod) && receivedNum >= netAmount
       ? Math.round((receivedNum - netAmount) * 100) / 100
+      : null;
+
+  const outstanding = customer?.net_balance ?? 0;
+  const creditLimit = customer?.credit_limit ?? 0;
+  const creditAvailable =
+    creditLimit > 0 ? Math.max(0, creditLimit - outstanding) : null;
+  const newBalanceAfterSale =
+    !isReturn && isCreditPayment(paymentMethod) && !isWalkInCustomer(customer)
+      ? outstanding + netAmount
       : null;
 
   return (
@@ -81,6 +95,37 @@ export const PaymentMethodDetails: React.FC<PaymentMethodDetailsProps> = ({
         <Text style={styles.changeHint}>
           Change to give: {formatCurrency(changeDue, currency)}
         </Text>
+      ) : null}
+
+      {!isReturn && isCreditPayment(paymentMethod) ? (
+        <View
+          style={[
+            styles.onlineBanner,
+            isWalkInCustomer(customer) && styles.creditWarningBanner,
+          ]}>
+          <Text style={styles.onlineBannerText}>
+            {isWalkInCustomer(customer)
+              ? 'Select a registered customer — credit sales cannot use Walk-in Customer.'
+              : `Charged to ${customer?.customer_name ?? 'customer account'}.`}
+          </Text>
+          {!isWalkInCustomer(customer) ? (
+            <View style={styles.creditStats}>
+              <Text style={styles.creditStatLine}>
+                Current balance: {formatCurrency(outstanding, currency)}
+              </Text>
+              {newBalanceAfterSale != null ? (
+                <Text style={styles.creditStatLine}>
+                  After this sale: {formatCurrency(newBalanceAfterSale, currency)}
+                </Text>
+              ) : null}
+              {creditAvailable != null ? (
+                <Text style={styles.creditStatLine}>
+                  Credit available: {formatCurrency(creditAvailable, currency)}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
       ) : null}
 
       {!isReturn && isOnlinePayment(paymentMethod) ? (
@@ -215,6 +260,19 @@ const styles = StyleSheet.create({
     color: colors.primaryDeep,
     flex: 1,
     lineHeight: 18,
+    fontWeight: '600',
+  },
+  creditWarningBanner: {
+    backgroundColor: colors.warningSoft,
+    borderColor: colors.warning,
+  },
+  creditStats: {
+    marginTop: 8,
+    gap: 4,
+  },
+  creditStatLine: {
+    ...typography.caption,
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   bankRow: {
