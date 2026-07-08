@@ -11,6 +11,10 @@ export const isCashPayment = (method: string): boolean => /^cash$/i.test(method)
 
 export const isCreditPayment = (method: string): boolean => /^credit$/i.test(method);
 
+export const isWalkInCustomer = (
+  customer: { id: number } | null | undefined,
+): boolean => !customer || customer.id === 0;
+
 /** Amount received field is auto-filled and read-only (cash allows change entry) */
 export const locksAmountReceived = (method: string): boolean =>
   !isCashPayment(method);

@@ -12,6 +12,7 @@ export type HomeStackParamList = {
   AlertsList: undefined;
   CustomersList: undefined;
   CustomerForm: { customerId?: number; selectOnSave?: boolean };
+  CustomerReceivePayment: { customerId: number };
   ExpensesList: undefined;
   ExpenseForm: { expenseId?: number };
 };

@@ -18,6 +18,8 @@ const defaultMetrics = (): DashboardMetrics => ({
   active_items: 0,
   low_stock_count: 0,
   customers_count: 0,
+  debtor_count: 0,
+  total_receivables: 0,
   shipments_today: 0,
 });
 

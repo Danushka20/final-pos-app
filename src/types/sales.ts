@@ -83,6 +83,7 @@ export interface CustomerSummary {
   address_line1?: string | null;
   nic?: string | null;
   tax_id?: string | null;
+  credit_limit?: number;
   net_balance?: number;
 }
 

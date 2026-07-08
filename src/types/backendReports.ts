@@ -13,6 +13,8 @@ export interface ReportFilters {
   date_to: string;
   branch_id: number | null;
   branch_name: string;
+  item_id?: number | null;
+  item_name?: string | null;
 }
 
 export interface SalesSummaryLineItem {
@@ -56,4 +58,5 @@ export interface FetchReportParams {
   dateTo: string;
   location?: string | null;
   branchId?: string | number | null;
+  itemId?: number | null;
 }

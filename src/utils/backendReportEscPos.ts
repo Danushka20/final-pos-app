@@ -56,6 +56,9 @@ const appendHeader = (
     escHeaderLine(ctx, `${report.filters.date_from} - ${report.filters.date_to}`),
   );
   lines.push(escHeaderLine(ctx, report.filters.branch_name));
+  if (report.filters.item_name) {
+    lines.push(escHeaderLine(ctx, `Item: ${report.filters.item_name}`));
+  }
   if (report.generated_at) {
     lines.push(escHeaderLine(ctx, `Generated: ${report.generated_at}`));
   }

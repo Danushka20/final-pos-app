@@ -14,6 +14,7 @@ import { BackendReportView } from '@/components/reports/BackendReportView';
 import { SystemReportView } from '@/components/reports/SystemReportView';
 import { useErrorDialog } from '@/context/ErrorDialogContext';
 import { usePosSettings } from '@/context/PosSettingsContext';
+import { ReportFilterBar } from '@/components/reports/ReportFilterBar';
 import { useSystemReport } from '@/hooks/useSystemReport';
 import { bluetoothPrintService } from '@/services/bluetooth/bluetoothPrintService';
 import { navigateToPrinterSetup } from '@/navigation/navigationRef';
@@ -22,6 +23,8 @@ import type { SystemReportHeader } from '@/types/reports';
 import type { ReportsStackParamList } from '@/navigation/types';
 import type { PosMobileSettings } from '@/types/settings';
 import { colors } from '@/theme';
+import { defaultReportFilters, formatReportDateRangeLabel } from '@/utils/reportDateFilters';
+import type { ReportFilterParams } from '@/types/reportFilters';
 
 type Route = RouteProp<ReportsStackParamList, 'ReportView'>;
 
@@ -45,7 +48,11 @@ export const ReportViewScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { settings, currency } = usePosSettings();
   const { showError, showConfirm } = useErrorDialog();
-  const { result, loading, refreshing, error, refresh } = useSystemReport(params.type);
+  const [filters, setFilters] = useState<ReportFilterParams>(defaultReportFilters);
+  const { result, loading, refreshing, error, refresh } = useSystemReport(
+    params.type,
+    filters,
+  );
   const [printing, setPrinting] = useState(false);
   const reportShotRef = useRef<ViewShotRef>(null);
   const lastError = useRef<string | null>(null);
@@ -106,12 +113,20 @@ export const ReportViewScreen: React.FC = () => {
     }
   };
 
-  const subtitle =
-    result?.source === 'dashboard'
-      ? result.report.subtitle
-      : result?.source === 'backend'
-        ? `${result.report.filters.date_from} — ${result.report.filters.date_to}`
-        : meta?.subtitle;
+  const subtitle = useMemo(() => {
+    if (result?.source === 'dashboard') {
+      return result.report.subtitle ?? formatReportDateRangeLabel(filters.dateFrom, filters.dateTo);
+    }
+    if (result?.source === 'backend') {
+      const itemSuffix = result.report.filters.item_name
+        ? ` · ${result.report.filters.item_name}`
+        : filters.itemLabel
+          ? ` · ${filters.itemLabel}`
+          : '';
+      return `${result.report.filters.date_from} — ${result.report.filters.date_to}${itemSuffix}`;
+    }
+    return meta?.subtitle;
+  }, [filters.dateFrom, filters.dateTo, filters.itemLabel, meta?.subtitle, result]);
 
   const scrollBottomPad = Math.max(insets.bottom, 16) + 88;
 
@@ -134,6 +149,8 @@ export const ReportViewScreen: React.FC = () => {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.primary} />
         }>
+        <ReportFilterBar filters={filters} onChange={setFilters} />
+
         {result ? (
           <>
             <View style={{ width: '100%', maxWidth: 400 }} collapsable={false}>

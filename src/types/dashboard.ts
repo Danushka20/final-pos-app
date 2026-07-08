@@ -15,6 +15,9 @@ export interface DashboardMetrics {
   active_items: number;
   low_stock_count: number;
   customers_count: number;
+  /** Customers with outstanding credit balance */
+  debtor_count?: number;
+  total_receivables?: number;
   shipments_today: number;
 }
 
