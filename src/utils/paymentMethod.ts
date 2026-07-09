@@ -11,6 +11,12 @@ export const isCashPayment = (method: string): boolean => /^cash$/i.test(method)
 
 export const isCreditPayment = (method: string): boolean => /^credit$/i.test(method);
 
+/** Match the Credit label from POS payment methods (preserves backend casing). */
+export const resolveCreditPaymentMethod = (
+  methods: string[],
+  fallback = 'Credit',
+): string => methods.find(m => isCreditPayment(m)) ?? fallback;
+
 export const isWalkInCustomer = (
   customer: { id: number } | null | undefined,
 ): boolean => !customer || customer.id === 0;

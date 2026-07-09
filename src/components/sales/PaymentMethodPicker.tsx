@@ -9,6 +9,8 @@ interface PaymentMethodPickerProps {
   selected: string;
   onSelect: (method: string) => void;
   title?: string;
+  /** When set, only this method is shown and cannot be changed. */
+  lockedMethod?: string | null;
 }
 
 export const PaymentMethodPicker: React.FC<PaymentMethodPickerProps> = ({
@@ -16,18 +18,28 @@ export const PaymentMethodPicker: React.FC<PaymentMethodPickerProps> = ({
   selected,
   onSelect,
   title = 'Payment method',
-}) => (
+  lockedMethod = null,
+}) => {
+  const displayMethods = lockedMethod ? [lockedMethod] : methods;
+
+  return (
   <Surface style={styles.card} elevation={1}>
     {title ? <Text style={styles.title}>{title}</Text> : null}
     <View style={styles.grid}>
-      {methods.map(method => {
+      {displayMethods.map(method => {
         const active = selected === method;
         const meta = getPaymentMethodMeta(method);
+        const locked = Boolean(lockedMethod);
 
         return (
           <Pressable
             key={method}
-            onPress={() => onSelect(method)}
+            onPress={() => {
+              if (!locked) {
+                onSelect(method);
+              }
+            }}
+            disabled={locked}
             style={[
               styles.tile,
               shadows.sm,
@@ -57,7 +69,8 @@ export const PaymentMethodPicker: React.FC<PaymentMethodPickerProps> = ({
       })}
     </View>
   </Surface>
-);
+  );
+};
 
 const styles = StyleSheet.create({
   card: {
