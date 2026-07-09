@@ -171,6 +171,8 @@ export interface SaleReceiptPayload {
 
 export interface CreateSalePayload {
   transaction_type?: string;
+  /** Links a return bill to the original sale (backend adjusts stock & credit balance). */
+  returned_from_sale_id?: number | null;
   refund_card_last4?: string | null;
   hold_pin?: string | null;
   order_status?: string;

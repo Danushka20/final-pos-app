@@ -45,7 +45,7 @@ import {
 } from '@/utils/batchUtils';
 import { isItemExpired } from '@/utils/expiryUtils';
 import { itemSellableQty } from '@/utils/itemInventoryUtils';
-import { isCreditPayment } from '@/utils/paymentMethod';
+import { isCreditPayment, resolveCreditPaymentMethod } from '@/utils/paymentMethod';
 import {
   mergePosCatalogAcrossBranches,
   itemNumberKey,
@@ -128,6 +128,14 @@ export const usePosSale = () => {
   const [batchItemIds, setBatchItemIds] = useState<Set<number>>(() => new Set());
 
   const isReturn = transactionMode === 'return';
+
+  const returnFromCreditSale = useMemo(
+    () =>
+      isReturn &&
+      returnSourceSale != null &&
+      isCreditPayment(returnSourceSale.payment_method ?? ''),
+    [isReturn, returnSourceSale],
+  );
 
   const locations = context?.filters.locations ?? [];
   const paymentMethods = context?.filters.payment_methods ?? ['Cash'];
@@ -1750,6 +1758,20 @@ export const usePosSale = () => {
       setError('Select a customer for credit sales so the balance can be tracked');
       return null;
     }
+    if (
+      isReturn &&
+      returnFromCreditSale &&
+      (isWalkIn ||
+        (returnSourceSale?.customer_id != null &&
+          activeCustomer.id !== returnSourceSale.customer_id))
+    ) {
+      setError('Credit returns must use the same customer from the original sale');
+      return null;
+    }
+
+    const resolvedPaymentMethod = returnFromCreditSale
+      ? resolveCreditPaymentMethod(paymentMethods)
+      : payment.payment_method;
 
     setSubmitting(true);
     setError(null);
@@ -1804,13 +1826,16 @@ export const usePosSale = () => {
         sub_total: checkoutSubTotal,
         discount: checkoutDiscount,
         net_amount: checkoutNet,
-        payment_method: payment.payment_method,
+        payment_method: resolvedPaymentMethod,
         amount_received: payment.amount_received,
         bank_id: payment.bank_id,
         cheque_number: payment.cheque_number,
         notes,
         items: saleLines,
         order_status: 'completed',
+        ...(isReturn && returnSourceSale?.id
+          ? { returned_from_sale_id: returnSourceSale.id }
+          : {}),
       });
 
       if (isReturn && payment.refund_card_last4) {
@@ -1875,6 +1900,8 @@ export const usePosSale = () => {
       resetDiscount,
       prepareCheckout,
       returnSourceSale,
+      returnFromCreditSale,
+      paymentMethods,
       salesId,
       selectedOffer,
       selectedOfferId,
@@ -1929,13 +1956,21 @@ export const usePosSale = () => {
         setReturnWithoutBill(false);
         setCart([]);
         setSearchQuery('');
-        if (sale.customer_id && sale.customer_name) {
-          setCustomer({
-            id: sale.customer_id,
-            customer_name: sale.customer_name,
-          });
+        if (sale.customer_id) {
+          try {
+            const full = await customerService.get(sale.customer_id);
+            setCustomer(full);
+          } catch {
+            setCustomer({
+              id: sale.customer_id,
+              customer_name: sale.customer_name ?? 'Customer',
+            });
+          }
         } else if (sale.customer_name) {
           setCustomer({ id: 0, customer_name: sale.customer_name });
+        }
+        if (isCreditPayment(sale.payment_method ?? '')) {
+          setPaymentMethod(resolveCreditPaymentMethod(paymentMethods));
         }
       } catch (e) {
         setRemainingReturnQtyByLineKey(new Map());
@@ -1945,7 +1980,7 @@ export const usePosSale = () => {
         setLoadingReturnSale(false);
       }
     },
-    [fetchReturnedQtyByOriginalSale],
+    [fetchReturnedQtyByOriginalSale, paymentMethods],
   );
 
   const findAndLoadReturnSale = useCallback(
@@ -2119,6 +2154,7 @@ export const usePosSale = () => {
     needsCategoryPick: false,
     transactionMode,
     isReturn,
+    returnFromCreditSale,
     switchTransactionMode,
     returnSourceSale,
     returnWithoutBill,

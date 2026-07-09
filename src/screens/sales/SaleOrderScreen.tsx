@@ -40,6 +40,7 @@ import {
   isWalkInCustomer,
   needsBank,
   needsPaymentReference,
+  resolveCreditPaymentMethod,
 } from '@/utils/paymentMethod';
 import type { CartLine, SaleReceiptPayload } from '@/types/sales';
 import {
@@ -271,6 +272,15 @@ export const SaleOrderScreen: React.FC = () => {
       setOriginalSaleId(pos.returnSourceSale.sales_id);
     }
   }, [pos.returnSourceSale?.sales_id]);
+
+  useEffect(() => {
+    if (!pos.returnFromCreditSale) {
+      return;
+    }
+    const creditMethod = resolveCreditPaymentMethod(pos.paymentMethods);
+    setPaymentMethod(creditMethod);
+    pos.setPaymentMethod(creditMethod);
+  }, [pos.returnFromCreditSale, pos.paymentMethods, pos.setPaymentMethod]);
 
   useEffect(() => {
     if (!pos.isReturn) {
@@ -513,7 +523,7 @@ export const SaleOrderScreen: React.FC = () => {
       ? (savedRefundCardLast4 ?? refundCardLast4).replace(/\D/g, '').slice(-4)
       : '';
 
-    if (pos.isReturn && refundDigits.length !== 4) {
+    if (pos.isReturn && !pos.returnFromCreditSale && refundDigits.length !== 4) {
       showError({
         title: 'Refund card',
         message: 'Enter credit card last 4 digits once. They will be saved for future returns.',
@@ -1007,7 +1017,7 @@ export const SaleOrderScreen: React.FC = () => {
                 placeholderTextColor={colors.textMuted}
                 editable={!pos.returnSourceSale}
               />
-              {refundCardReady && !savedRefundCardLast4 ? (
+              {refundCardReady && !savedRefundCardLast4 && !pos.returnFromCreditSale ? (
                 <>
                   <Text style={styles.sectionTitle}>Refund card last 4 digits</Text>
                   <Text style={styles.refundCardHint}>
@@ -1029,7 +1039,12 @@ export const SaleOrderScreen: React.FC = () => {
 
           <Text style={styles.sectionTitle}>Customer</Text>
           <Pressable
-            onPress={() => setCustomerModal(true)}
+            onPress={() => {
+              if (!pos.returnFromCreditSale) {
+                setCustomerModal(true);
+              }
+            }}
+            disabled={pos.returnFromCreditSale}
             borderWidth={1}
             borderColor={colors.primaryMuted}
             borderRadius="$xl"
@@ -1054,6 +1069,12 @@ export const SaleOrderScreen: React.FC = () => {
           <PaymentMethodPicker
             methods={pos.paymentMethods}
             selected={paymentMethod}
+            lockedMethod={
+              pos.returnFromCreditSale
+                ? resolveCreditPaymentMethod(pos.paymentMethods)
+                : null
+            }
+            title={pos.returnFromCreditSale ? 'Refund to account' : 'Payment method'}
             onSelect={method => {
               setPaymentMethod(method);
               pos.setPaymentMethod(method);

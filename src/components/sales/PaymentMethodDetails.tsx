@@ -73,6 +73,10 @@ export const PaymentMethodDetails: React.FC<PaymentMethodDetailsProps> = ({
     !isReturn && isCreditPayment(paymentMethod) && !isWalkInCustomer(customer)
       ? outstanding + netAmount
       : null;
+  const newBalanceAfterReturn =
+    isReturn && isCreditPayment(paymentMethod) && !isWalkInCustomer(customer)
+      ? Math.max(0, outstanding - netAmount)
+      : null;
 
   return (
     <View key={paymentMethod} style={styles.panel}>
@@ -125,6 +129,25 @@ export const PaymentMethodDetails: React.FC<PaymentMethodDetailsProps> = ({
               ) : null}
             </View>
           ) : null}
+        </View>
+      ) : null}
+
+      {isReturn && isCreditPayment(paymentMethod) && !isWalkInCustomer(customer) ? (
+        <View style={styles.onlineBanner}>
+          <Text style={styles.onlineBannerText}>
+            Credit return — {formatCurrency(netAmount, currency)} will be deducted from{' '}
+            {customer?.customer_name ?? 'customer account'}.
+          </Text>
+          <View style={styles.creditStats}>
+            <Text style={styles.creditStatLine}>
+              Current balance: {formatCurrency(outstanding, currency)}
+            </Text>
+            {newBalanceAfterReturn != null ? (
+              <Text style={styles.creditStatLine}>
+                After this return: {formatCurrency(newBalanceAfterReturn, currency)}
+              </Text>
+            ) : null}
+          </View>
         </View>
       ) : null}
 
